@@ -175,6 +175,66 @@ export function useAlign() {
     }
   }
 
+  // 水平等间距
+  function horizontalEvenSpacing({ currentSelectGroup, flowData, flowConfig, plumb }) {
+    if (!checkAlign(currentSelectGroup)) return;
+    const nodeList = flowData.nodeList;
+    const selectGroup = [...currentSelectGroup].sort((a, b) => a.x - b.x);
+    const first = selectGroup[0];
+    const last = selectGroup[selectGroup.length - 1];
+    const totalWidth = selectGroup.reduce((sum, n) => sum + n.width, 0);
+    const gap = utils.div(last.x + last.width - first.x - totalWidth, selectGroup.length - 1);
+    let baseX = first.x;
+    for (let i = 1; i < selectGroup.length - 1; i++) {
+      baseX = baseX + selectGroup[i - 1].width + gap;
+      const f = nodeList.find((n: INode) => n.id === selectGroup[i].id);
+      f.tx = baseX;
+      f.ty = f.y;
+      plumb.animate(
+        selectGroup[i].id,
+        { top: f.ty, left: baseX },
+        {
+          duration: flowConfig.defaultStyle.alignDuration,
+          complete: function () {
+            f.x = f.tx;
+            f.y = f.ty;
+          },
+        },
+      );
+    }
+    message.success('水平等间距完成！');
+  }
+
+  // 垂直等间距
+  function verticalEvenSpacing({ currentSelectGroup, flowData, flowConfig, plumb }) {
+    if (!checkAlign(currentSelectGroup)) return;
+    const nodeList = flowData.nodeList;
+    const selectGroup = [...currentSelectGroup].sort((a, b) => a.y - b.y);
+    const first = selectGroup[0];
+    const last = selectGroup[selectGroup.length - 1];
+    const totalHeight = selectGroup.reduce((sum, n) => sum + n.height, 0);
+    const gap = utils.div(last.y + last.height - first.y - totalHeight, selectGroup.length - 1);
+    let baseY = first.y;
+    for (let i = 1; i < selectGroup.length - 1; i++) {
+      baseY = baseY + selectGroup[i - 1].height + gap;
+      const f = nodeList.find((n: INode) => n.id === selectGroup[i].id);
+      f.tx = f.x;
+      f.ty = baseY;
+      plumb.animate(
+        selectGroup[i].id,
+        { top: baseY, left: f.tx },
+        {
+          duration: flowConfig.defaultStyle.alignDuration,
+          complete: function () {
+            f.x = f.tx;
+            f.y = f.ty;
+          },
+        },
+      );
+    }
+    message.success('垂直等间距完成！');
+  }
+
   return {
     verticaLeft,
     verticalCenter,
@@ -182,5 +242,7 @@ export function useAlign() {
     horizontalUp,
     horizontalCenter,
     horizontalDown,
+    horizontalEvenSpacing,
+    verticalEvenSpacing,
   };
 }

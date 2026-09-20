@@ -50,4 +50,14 @@ export const shortcutKeys = {
     codeName: 'CTRL + T',
     shortcutName: '测试页面',
   },
+  undo: {
+    code: 'KeyZ',
+    codeName: 'CTRL + Z',
+    shortcutName: '撤销',
+  },
+  redo: {
+    code: 'KeyY',
+    codeName: 'CTRL + Y',
+    shortcutName: '重做',
+  },
 };

@@ -138,6 +138,8 @@
     horizontalUp,
     horizontalCenter,
     horizontalDown,
+    horizontalEvenSpacing,
+    verticalEvenSpacing,
   } = useAlign();
 
   const [createContextMenu] = useContextMenu();
@@ -448,6 +450,13 @@
 
   // 画布右健
   function showContainerContextMenu(e: MouseEvent) {
+    // 对齐方式公共参数
+    const alignParams = () => ({
+      currentSelectGroup: unref(currentSelectGroup),
+      flowData: props.data,
+      flowConfig: props.config,
+      plumb: props.plumb,
+    });
     createContextMenu({
       event: e,
       items: [
@@ -480,69 +489,51 @@
           children: [
             {
               handler: () => {
-                verticaLeft({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                verticaLeft(alignParams());
               },
               label: '垂直左对齐',
             },
             {
               handler: () => {
-                verticalCenter({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                verticalCenter(alignParams());
               },
               label: '垂直居中',
             },
             {
               handler: () => {
-                verticalRight({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                verticalRight(alignParams());
               },
               label: '垂直右对齐',
             },
             {
               handler: () => {
-                horizontalUp({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                horizontalUp(alignParams());
               },
               label: '水平上对齐',
             },
             {
               handler: () => {
-                horizontalCenter({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                horizontalCenter(alignParams());
               },
               label: '水平居中',
             },
             {
               handler: () => {
-                horizontalDown({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                horizontalDown(alignParams());
               },
               label: '水平下对齐',
+            },
+            {
+              handler: () => {
+                horizontalEvenSpacing(alignParams());
+              },
+              label: '水平等间距',
+            },
+            {
+              handler: () => {
+                verticalEvenSpacing(alignParams());
+              },
+              label: '垂直等间距',
             },
           ],
         },
@@ -552,6 +543,12 @@
 
   // 节点右键
   function showNodeContextMenu(e: MouseEvent) {
+    const alignParams = () => ({
+      currentSelectGroup: unref(currentSelectGroup),
+      flowData: props.data,
+      flowConfig: props.config,
+      plumb: props.plumb,
+    });
     createContextMenu({
       event: e,
       items: [
@@ -559,13 +556,42 @@
           handler: () => {
             copyNode();
           },
-          label: '复制节点',
+          label: unref(currentSelectGroup).length > 1 ? '复制节点(多选)' : '复制节点',
         },
         {
           handler: () => {
             deleteNode();
           },
-          label: '删除节点',
+          label: unref(currentSelectGroup).length > 1 ? '删除节点(多选)' : '删除节点',
+        },
+        {
+          label: '对齐方式',
+          children: [
+            {
+              handler: () => {
+                verticaLeft(alignParams());
+              },
+              label: '左对齐',
+            },
+            {
+              handler: () => {
+                verticalRight(alignParams());
+              },
+              label: '右对齐',
+            },
+            {
+              handler: () => {
+                horizontalEvenSpacing(alignParams());
+              },
+              label: '水平等间距',
+            },
+            {
+              handler: () => {
+                verticalEvenSpacing(alignParams());
+              },
+              label: '垂直等间距',
+            },
+          ],
         },
       ],
     });
@@ -582,17 +608,26 @@
 
   // 粘贴
   function paste() {
-    let dis = 0;
+    if (clipboard.length <= 0) {
+      message.warning('剪切板为空，请先复制节点！');
+      return;
+    }
+    // 保持节点间的相对位置
+    const minX = Math.min(...clipboard.map((n: INode) => n.x));
+    const minY = Math.min(...clipboard.map((n: INode) => n.y));
     clipboard.forEach((node: INode) => {
       let newNode = Object.assign({}, node);
       newNode.id = newNode.type + '-' + utils.getId();
-      let nodePos = computeNodePos(mouse.position.x + dis, mouse.position.y + dis);
+      let nodePos = computeNodePos(
+        mouse.position.x + (node.x - minX),
+        mouse.position.y + (node.y - minY),
+      );
       newNode.x = nodePos.x;
       newNode.y = nodePos.y;
-      dis += 20;
       unref(flowData).nodeList.push(newNode);
       emits('update:data', unref(flowData));
     });
+    message.success('粘贴成功！');
   }
 
   // 全选
@@ -616,6 +651,11 @@
     } else if (unref(currentSelect).id) {
       clipboard.push(unref(currentSelect) as INode);
     }
+    if (clipboard.length > 0) {
+      message.success('已复制 ' + clipboard.length + ' 个节点！');
+    } else {
+      message.warning('请先选择要复制的节点！');
+    }
   }
 
   // 查询删除节点关联的连接线
@@ -635,7 +675,16 @@
     let linkList = unref(flowData).linkList;
     let arr: INode[] = [];
 
-    arr.push(Object.assign({}, unref(currentSelect) as INode));
+    if (unref(currentSelectGroup).length > 1) {
+      arr = unref(currentSelectGroup).map((node) => Object.assign({}, node));
+    } else if (unref(currentSelect)?.id) {
+      arr.push(Object.assign({}, unref(currentSelect) as INode));
+    }
+
+    if (arr.length <= 0) {
+      message.warning('请先选择要删除的节点！');
+      return;
+    }
 
     unref(flowData).status = FlowStatusEnum.LOADING;
 
@@ -660,7 +709,10 @@
     });
     unref(flowData).status = FlowStatusEnum.CREATE;
     emits('update:data', unref(flowData));
+    currentSelectGroup.value = [];
+    props.plumb.clearDragSelection();
     selectContainer();
+    message.success('已删除 ' + arr.length + ' 个节点！');
   }
 
   // 点击画布

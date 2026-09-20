@@ -7,6 +7,20 @@
       <Toolbar
         :currentTool="currentTool"
         :flowData="flowData"
+        :canUndo="canUndo"
+        :canRedo="canRedo"
+        @undo="undo"
+        @redo="redo"
+        @validate="validate"
+        @importFlow="importFlow"
+        @exportJson="exportJson"
+        @exportPng="
+          generateFlowImage(
+            flowData.nodeList,
+            flowConfig.defaultStyle.photoBlankDistance,
+            checkFlow,
+          )
+        "
         @generateFlowImage="
           generateFlowImage(
             flowData.nodeList,
@@ -28,7 +42,7 @@
           ref="flowAreaRef"
           :dragInfo="dragInfo"
           :config="flowConfig"
-          v-model:data="flowData"
+          :data="flowData"
           v-model:select="currentSelect"
           v-model:selectGroup="currentSelectGroup"
           :plumb="plumb"
@@ -71,11 +85,27 @@
 
   <!-- 测试 -->
   <TestModal v-model:testVisible="testVisible" :flowData="flowData" @loadFlow="loadFlow" />
+
+  <!-- 流程校验 -->
+  <ValidateModal
+    v-model:validateVisible="validateVisible"
+    :issues="validateIssues"
+    @locate="locateIssue"
+  />
+
+  <!-- 导入JSON文件 -->
+  <input
+    ref="importFileRef"
+    type="file"
+    accept=".json"
+    style="display: none"
+    @change="handleImportFile"
+  />
 </template>
 
 <script lang="ts" setup>
   import { jsPlumb } from 'jsplumb';
-  import { reactive, ref, onMounted, nextTick, unref } from 'vue';
+  import { reactive, ref, computed, watch, onMounted, nextTick, unref } from 'vue';
   import { message } from 'ant-design-vue';
   import { cloneDeep } from 'lodash-es';
   import { ls } from 'vue-lsp';
@@ -84,6 +114,7 @@
   import SettingModal from './modules/SettingModal.vue';
   import ShortcutKeyModal from './modules/ShortcutKeyModal.vue';
   import TestModal from './modules/TestModal.vue';
+  import ValidateModal from './modules/ValidateModal.vue';
   import FlowElement from './modules/FlowElement.vue';
   import Toolbar from './modules/Toolbar.vue';
   import FlowFooter from './modules/FlowFooter.vue';
@@ -94,6 +125,9 @@
   import { useContextMenu } from '/@/hooks/useContextMenu';
   import { useGenerateFlowImage } from '/@/hooks/useGenerateFlowImage';
   import { useShortcutKey } from '/@/hooks/useShortcutKey';
+  import { useHistory } from '/@/hooks/useHistory';
+  import { useValidateFlow } from '/@/hooks/useValidateFlow';
+  import type { IFlowIssue } from '/@/hooks/useValidateFlow';
   import { flowConfig as defaultFlowConfig, settingConfig } from '/@/config/flow';
 
   const [createContextMenu] = useContextMenu();
@@ -104,6 +138,12 @@
 
   // 快捷键
   const { listenShortcutKey, offShortcutKey, onShortcutKey } = useShortcutKey();
+
+  // 撤销重做历史记录
+  const { historyState, record, reset, undo: historyUndo, redo: historyRedo } = useHistory();
+
+  // 流程校验
+  const { validateFlow } = useValidateFlow();
 
   // 流程配置
   const flowConfig = ref(cloneDeep(defaultFlowConfig));
@@ -125,6 +165,15 @@
 
   // 测试弹窗显隐
   const testVisible = ref<boolean>(false);
+
+  // 校验弹窗显隐
+  const validateVisible = ref<boolean>(false);
+
+  // 校验结果
+  const validateIssues = ref<IFlowIssue[]>([]);
+
+  // 导入文件input
+  const importFileRef = ref();
 
   // 流程DSL
   const flowData = reactive<Recordable>({
@@ -162,22 +211,60 @@
     }
   }
 
-  // 渲染流程
-  async function loadFlow(str = '') {
+  // 生成流程快照
+  function takeSnapshot() {
+    return JSON.stringify({
+      nodeList: flowData.nodeList,
+      linkList: flowData.linkList,
+    });
+  }
+
+  // 是否暂停记录历史
+  let historyPause = false;
+  let historyTimer: Nullable<ReturnType<typeof setTimeout>> = null;
+
+  // 记录历史(防抖合并连续变更)
+  function recordHistory() {
+    if (historyPause) return;
+    if (historyTimer) clearTimeout(historyTimer);
+    historyTimer = setTimeout(() => {
+      if (historyPause) return;
+      record(takeSnapshot());
+    }, 300);
+  }
+
+  watch(() => [flowData.nodeList, flowData.linkList], recordHistory, { deep: true });
+
+  // 立即记录待处理的快照
+  function flushHistory() {
+    if (historyTimer) {
+      clearTimeout(historyTimer);
+      historyTimer = null;
+      record(takeSnapshot());
+    }
+  }
+
+  // 是否可撤销
+  const canUndo = computed(() => historyState.index > 0);
+
+  // 是否可重做
+  const canRedo = computed(() => historyState.index < historyState.stack.length - 1);
+
+  // 渲染流程数据
+  async function renderFlow(loadData: Recordable) {
     clear();
     await nextTick();
-    const loadData = JSON.parse(str);
     flowData.attr = loadData.attr;
     flowData.config = loadData.config;
     flowData.status = FlowStatusEnum.LOADING;
-    unref(plumb).batch(async () => {
-      const nodeList = loadData.nodeList;
-      nodeList.forEach((node: INode) => {
-        flowData.nodeList.push(node);
-      });
+    const nodeList = loadData.nodeList || [];
+    nodeList.forEach((node: INode) => {
+      flowData.nodeList.push(node);
+    });
 
-      await nextTick();
-      const linkList = loadData.linkList;
+    await nextTick();
+    unref(plumb).batch(() => {
+      const linkList = loadData.linkList || [];
       linkList.forEach((link: ILink) => {
         flowData.linkList.push(link);
         let conn = unref(plumb).connect({
@@ -210,15 +297,142 @@
           link_dom?.removeEventListener('click', labelHandle);
         }
       });
-
-      clearSelect();
-      flowData.status = FlowStatusEnum.MODIFY;
     }, true);
 
+    clearSelect();
+    flowData.status = FlowStatusEnum.MODIFY;
     unref(flowAreaRef).container.pos = {
       top: 0,
       left: 0,
     };
+  }
+
+  // 渲染流程
+  async function loadFlow(str = '') {
+    historyPause = true;
+    if (historyTimer) clearTimeout(historyTimer);
+    try {
+      const loadData = JSON.parse(str);
+      await renderFlow(loadData);
+    } finally {
+      historyPause = false;
+    }
+    // 加载完成后重置历史记录
+    reset(takeSnapshot());
+  }
+
+  // 恢复快照
+  async function restoreSnapshot(snap: string) {
+    historyPause = true;
+    if (historyTimer) clearTimeout(historyTimer);
+    try {
+      const data = JSON.parse(snap);
+      await renderFlow({
+        attr: flowData.attr,
+        config: flowData.config,
+        nodeList: data.nodeList,
+        linkList: data.linkList,
+      });
+    } finally {
+      historyPause = false;
+    }
+  }
+
+  // 撤销
+  async function undo() {
+    flushHistory();
+    const snap = historyUndo();
+    if (!snap) {
+      message.warning('没有可撤销的操作！');
+      return;
+    }
+    await restoreSnapshot(snap);
+    message.success('撤销成功！');
+  }
+
+  // 重做
+  async function redo() {
+    flushHistory();
+    const snap = historyRedo();
+    if (!snap) {
+      message.warning('没有可重做的操作！');
+      return;
+    }
+    await restoreSnapshot(snap);
+    message.success('重做成功！');
+  }
+
+  // 流程校验
+  function validate() {
+    if (flowData.nodeList.length <= 0) {
+      message.error('流程图中无任何节点！');
+      return;
+    }
+    validateIssues.value = validateFlow(flowData.nodeList, flowData.linkList);
+    validateVisible.value = true;
+    if (validateIssues.value.length > 0) {
+      message.warning('校验完成，共发现 ' + validateIssues.value.length + ' 个问题！');
+    } else {
+      message.success('校验通过，未发现问题！');
+    }
+  }
+
+  // 定位校验问题
+  function locateIssue(issue: IFlowIssue) {
+    currentSelectGroup.value = [];
+    if (issue.nodeIds.length > 0) {
+      const node = flowData.nodeList.find((n: INode) => n.id === issue.nodeIds[0]);
+      if (node) currentSelect.value = node;
+    } else if (issue.linkIds.length > 0) {
+      const link = flowData.linkList.find((l: ILink) => l.id === issue.linkIds[0]);
+      if (link) currentSelect.value = link;
+    }
+    // 高亮问题相关的节点与连线
+    nextTick(() => {
+      [...issue.nodeIds, ...issue.linkIds].forEach((id) => {
+        const el = document.querySelector('#' + id);
+        el?.classList.add('validate-highlight');
+        setTimeout(() => {
+          el?.classList.remove('validate-highlight');
+        }, 2000);
+      });
+    });
+  }
+
+  // 导出JSON
+  function exportJson() {
+    if (!checkFlow()) return;
+    const flowObj = Object.assign({}, flowData, { status: FlowStatusEnum.SAVE });
+    const blob = new Blob([JSON.stringify(flowObj, null, 2)], { type: 'application/json' });
+    const alink = document.createElement('a');
+    alink.href = URL.createObjectURL(blob);
+    alink.download = `流程设计图_${flowData.attr.id}.json`;
+    alink.click();
+    URL.revokeObjectURL(alink.href);
+    message.success('导出JSON成功！');
+  }
+
+  // 导入JSON
+  function importFlow() {
+    unref(importFileRef)?.click();
+  }
+
+  // 处理导入文件
+  function handleImportFile(e: Event) {
+    const target = e.target as HTMLInputElement;
+    const file = target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        await loadFlow(reader.result as string);
+        message.success('导入JSON成功！');
+      } catch (err) {
+        message.error('导入失败，请检查JSON文件格式！');
+      }
+    };
+    reader.readAsText(file);
+    target.value = '';
   }
 
   // 实例化JsPlumb
@@ -386,6 +600,7 @@
       1,
     );
     currentSelect.value = undefined;
+    message.success('删除连线成功！');
   }
 
   // 键盘移动节点
@@ -484,6 +699,8 @@
       moveNode,
       saveFlow,
       openTest,
+      undo,
+      redo,
     });
 
     // 初始画布设置
@@ -491,5 +708,8 @@
 
     // 初始化流程图
     initFlow();
+
+    // 初始化历史记录
+    reset(takeSnapshot());
   });
 </script>

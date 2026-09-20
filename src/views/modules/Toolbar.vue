@@ -17,6 +17,64 @@
     </div>
 
     <div class="header-option__buttons">
+      <a-tooltip title="撤销 (Ctrl+Z)" placement="bottom">
+        <a-button
+          @click="emits('undo')"
+          :disabled="!canUndo"
+          class="header-option__button"
+          size="small"
+        >
+          <template #icon>
+            <component :is="'UndoOutlined'" />
+          </template>
+        </a-button>
+      </a-tooltip>
+
+      <a-tooltip title="重做 (Ctrl+Y)" placement="bottom">
+        <a-button
+          @click="emits('redo')"
+          :disabled="!canRedo"
+          class="header-option__button"
+          size="small"
+        >
+          <template #icon>
+            <component :is="'RedoOutlined'" />
+          </template>
+        </a-button>
+      </a-tooltip>
+
+      <a-tooltip title="流程校验" placement="bottom">
+        <a-button @click="emits('validate')" class="header-option__button" size="small">
+          <template #icon>
+            <component :is="'SafetyCertificateOutlined'" />
+          </template>
+        </a-button>
+      </a-tooltip>
+
+      <a-tooltip title="导入JSON" placement="bottom">
+        <a-button @click="emits('importFlow')" class="header-option__button" size="small">
+          <template #icon>
+            <component :is="'ImportOutlined'" />
+          </template>
+        </a-button>
+      </a-tooltip>
+
+      <a-dropdown>
+        <a-tooltip title="导出" placement="bottom">
+          <a-button class="header-option__button" size="small">
+            <template #icon>
+              <component :is="'ExportOutlined'" />
+            </template>
+          </a-button>
+        </a-tooltip>
+        <template #overlay>
+          <a-menu>
+            <a-menu-item key="json" @click="emits('exportJson')">导出JSON</a-menu-item>
+            <a-menu-item key="png" @click="emits('exportPng')">导出PNG图片</a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
+
       <a-tooltip title="生成流程图片" placement="bottom">
         <a-button @click="emits('generateFlowImage')" class="header-option__button" size="small">
           <template #icon>
@@ -97,10 +155,24 @@
       type: Object,
       default: () => ({}),
     },
+    canUndo: {
+      type: Boolean,
+      default: false,
+    },
+    canRedo: {
+      type: Boolean,
+      default: false,
+    },
   });
 
   const emits = defineEmits([
     'selectTool',
+    'undo',
+    'redo',
+    'validate',
+    'importFlow',
+    'exportJson',
+    'exportPng',
     'generateFlowImage',
     'clear',
     'toggleShowGrid',

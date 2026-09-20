@@ -69,6 +69,7 @@
 <script lang="ts" setup>
   import { ChangeEvent } from 'ant-design-vue/lib/_util/EventInterface';
   import { ref, watch, unref, PropType } from 'vue';
+  import { message } from 'ant-design-vue';
   import { INode, ILink, NodesType } from '/@/type/index';
   import { CommonNodeTypeEnum, ActiveTypeEnum } from '/@/type/enums';
 
@@ -96,6 +97,7 @@
   // 修改节点名称
   function nodeNameChange(e: ChangeEvent) {
     (currentSelect.value as INode).nodeName = e.target.value ?? '';
+    message.success('节点名称修改成功！');
   }
 
   // 是否可以修改节点名称
@@ -136,6 +138,7 @@
       let labelOverlay = conn.getLabelOverlay();
       if (labelOverlay) conn.removeOverlay(labelOverlay.id);
     }
+    message.success('连线文本修改成功！');
   }
 
   watch(

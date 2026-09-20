@@ -48,6 +48,14 @@ export function useShortcutKey() {
           case shortcutKeys.testModal.code:
             handler.openTest();
             break;
+          case shortcutKeys.undo.code:
+            e.preventDefault();
+            handler.undo && handler.undo();
+            break;
+          case shortcutKeys.redo.code:
+            e.preventDefault();
+            handler.redo && handler.redo();
+            break;
         }
       }
     };

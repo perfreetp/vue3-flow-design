@@ -26,6 +26,12 @@ const ICON_LIST = [
   'EyeOutlined',
   'EyeInvisibleOutlined',
   'GithubOutlined',
+  'UndoOutlined',
+  'RedoOutlined',
+  'SafetyCertificateOutlined',
+  'ImportOutlined',
+  'ExportOutlined',
+  'AimOutlined',
 ];
 
 export function registerIconsComp(app: App) {
