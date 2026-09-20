@@ -1,5 +1,6 @@
 import { message } from 'ant-design-vue';
 import { utils } from '/@/utils/common';
+import { INode } from '/@/type/index';
 
 export function useAlign() {
   // 节点排列前校验节点数量
@@ -9,6 +10,79 @@ export function useAlign() {
       return false;
     }
     return true;
+  }
+
+  // 移动节点到指定位置（动画）
+  function moveNodeTo(nodeList, node, x, y, flowConfig, plumb) {
+    const f = nodeList.find((n: INode) => n.id === node.id);
+    if (!f) return;
+    plumb.animate(
+      node.id,
+      { top: y, left: x },
+      {
+        duration: flowConfig.defaultStyle.alignDuration,
+        complete: function () {
+          f.x = x;
+          f.y = y;
+        },
+      },
+    );
+  }
+
+  // 左对齐
+  function alignLeft({ currentSelectGroup, flowData, flowConfig, plumb }) {
+    if (!checkAlign(currentSelectGroup)) return;
+    const nodeList = flowData.nodeList;
+    const minX = Math.min(...currentSelectGroup.map((n: INode) => n.x));
+    currentSelectGroup.forEach((node: INode) => {
+      moveNodeTo(nodeList, node, minX, node.y, flowConfig, plumb);
+    });
+    message.success('左对齐完成！');
+  }
+
+  // 右对齐
+  function alignRight({ currentSelectGroup, flowData, flowConfig, plumb }) {
+    if (!checkAlign(currentSelectGroup)) return;
+    const nodeList = flowData.nodeList;
+    const maxRight = Math.max(...currentSelectGroup.map((n: INode) => n.x + n.width));
+    currentSelectGroup.forEach((node: INode) => {
+      moveNodeTo(nodeList, node, maxRight - node.width, node.y, flowConfig, plumb);
+    });
+    message.success('右对齐完成！');
+  }
+
+  // 水平等间距
+  function horizontalEvenSpacing({ currentSelectGroup, flowData, flowConfig, plumb }) {
+    if (!checkAlign(currentSelectGroup)) return;
+    const nodeList = flowData.nodeList;
+    const selectGroup = [...currentSelectGroup].sort((a: INode, b: INode) => a.x - b.x);
+    const totalWidth = selectGroup.reduce((sum: number, n: INode) => sum + n.width, 0);
+    const minX = selectGroup[0].x;
+    const maxRight = Math.max(...selectGroup.map((n: INode) => n.x + n.width));
+    const gap = utils.div(maxRight - minX - totalWidth, selectGroup.length - 1);
+    let currentX = minX;
+    selectGroup.forEach((node: INode) => {
+      moveNodeTo(nodeList, node, currentX, node.y, flowConfig, plumb);
+      currentX += node.width + gap;
+    });
+    message.success('水平等间距完成！');
+  }
+
+  // 垂直等间距
+  function verticalEvenSpacing({ currentSelectGroup, flowData, flowConfig, plumb }) {
+    if (!checkAlign(currentSelectGroup)) return;
+    const nodeList = flowData.nodeList;
+    const selectGroup = [...currentSelectGroup].sort((a: INode, b: INode) => a.y - b.y);
+    const totalHeight = selectGroup.reduce((sum: number, n: INode) => sum + n.height, 0);
+    const minY = selectGroup[0].y;
+    const maxBottom = Math.max(...selectGroup.map((n: INode) => n.y + n.height));
+    const gap = utils.div(maxBottom - minY - totalHeight, selectGroup.length - 1);
+    let currentY = minY;
+    selectGroup.forEach((node: INode) => {
+      moveNodeTo(nodeList, node, node.x, currentY, flowConfig, plumb);
+      currentY += node.height + gap;
+    });
+    message.success('垂直等间距完成！');
   }
 
   // 垂直左对齐
@@ -35,6 +109,7 @@ export function useAlign() {
         },
       );
     }
+    message.success('垂直左对齐完成！');
   }
 
   // 垂直居中
@@ -63,6 +138,7 @@ export function useAlign() {
         },
       );
     }
+    message.success('垂直居中完成！');
   }
 
   // 垂直右对齐
@@ -91,6 +167,7 @@ export function useAlign() {
         },
       );
     }
+    message.success('垂直右对齐完成！');
   }
 
   // 水平上对齐
@@ -117,6 +194,7 @@ export function useAlign() {
         },
       );
     }
+    message.success('水平上对齐完成！');
   }
 
   // 水平居中
@@ -145,6 +223,7 @@ export function useAlign() {
         },
       );
     }
+    message.success('水平居中完成！');
   }
 
   // 水平下对齐
@@ -173,6 +252,7 @@ export function useAlign() {
         },
       );
     }
+    message.success('水平下对齐完成！');
   }
 
   return {
@@ -182,5 +262,9 @@ export function useAlign() {
     horizontalUp,
     horizontalCenter,
     horizontalDown,
+    alignLeft,
+    alignRight,
+    horizontalEvenSpacing,
+    verticalEvenSpacing,
   };
 }

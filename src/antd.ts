@@ -1,5 +1,6 @@
 import type { App } from 'vue';
 import {
+  Alert,
   Button,
   Checkbox,
   Divider,
@@ -21,6 +22,7 @@ import {
 } from 'ant-design-vue';
 
 export function registerAntdComp(app: App) {
+  app.use(Alert);
   app.use(Button);
   app.use(Checkbox);
   app.use(Divider);

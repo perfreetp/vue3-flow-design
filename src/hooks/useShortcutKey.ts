@@ -10,6 +10,9 @@ export function useShortcutKey() {
     document.onkeydown = (e: KeyboardEvent) => {
       // 画布聚焦开启快捷键
       if (!activeShortcutKey) return;
+      // 输入框聚焦时不响应画布快捷键
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
       const key = e.code;
 
       switch (key) {
@@ -43,12 +46,26 @@ export function useShortcutKey() {
       if (e.ctrlKey) {
         switch (key) {
           case shortcutKeys.settingModal.code:
+            e.preventDefault();
             handler.saveFlow();
             break;
           case shortcutKeys.testModal.code:
+            e.preventDefault();
             handler.openTest();
             break;
+          case shortcutKeys.undo.code:
+            e.preventDefault();
+            handler.undo();
+            break;
+          case shortcutKeys.redo.code:
+            e.preventDefault();
+            handler.redo();
+            break;
         }
+      }
+
+      if (key === shortcutKeys.deleteSelection.code) {
+        handler.deleteSelection();
       }
     };
     // 拖拽、多选快捷键复位

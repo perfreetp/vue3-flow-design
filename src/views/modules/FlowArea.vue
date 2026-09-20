@@ -77,6 +77,7 @@
 <script lang="ts" setup>
   import { reactive, ref, computed, watch, unref, PropType } from 'vue';
   import { message } from 'ant-design-vue';
+  import { cloneDeep } from 'lodash-es';
   import { utils } from '/@/utils/common';
   import FlowNode from './FlowNode.vue';
   import { useContextMenu } from '/@/hooks/useContextMenu';
@@ -126,6 +127,7 @@
     'selectTool',
     'onShortcutKey',
     'saveFlow',
+    'createLinks',
     'update:select',
     'update:selectGroup',
     'update:data',
@@ -138,6 +140,10 @@
     horizontalUp,
     horizontalCenter,
     horizontalDown,
+    alignLeft,
+    alignRight,
+    horizontalEvenSpacing,
+    verticalEvenSpacing,
   } = useAlign();
 
   const [createContextMenu] = useContextMenu();
@@ -211,7 +217,17 @@
   let tempLinkId = '';
 
   // 剪切板内容
-  let clipboard: INode[] = [];
+  let clipboard: { nodes: INode[]; links: ILink[] } = { nodes: [], links: [] };
+
+  // 执行对齐操作
+  function execAlign(alignFn: Fn) {
+    alignFn({
+      currentSelectGroup: unref(currentSelectGroup),
+      flowData: props.data,
+      flowConfig: props.config,
+      plumb: props.plumb,
+    });
+  }
 
   const gridStyle = computed(() => {
     return {
@@ -365,6 +381,7 @@
     }
     unref(flowData).nodeList.push(newNode);
     emits('update:data', unref(flowData));
+    message.success('添加节点成功！');
   }
 
   // 画布鼠标按下
@@ -480,69 +497,63 @@
           children: [
             {
               handler: () => {
-                verticaLeft({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                execAlign(verticaLeft);
               },
               label: '垂直左对齐',
             },
             {
               handler: () => {
-                verticalCenter({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                execAlign(verticalCenter);
               },
               label: '垂直居中',
             },
             {
               handler: () => {
-                verticalRight({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                execAlign(verticalRight);
               },
               label: '垂直右对齐',
             },
             {
               handler: () => {
-                horizontalUp({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                execAlign(horizontalUp);
               },
               label: '水平上对齐',
             },
             {
               handler: () => {
-                horizontalCenter({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                execAlign(horizontalCenter);
               },
               label: '水平居中',
             },
             {
               handler: () => {
-                horizontalDown({
-                  currentSelectGroup: unref(currentSelectGroup),
-                  flowData: props.data,
-                  flowConfig: props.config,
-                  plumb: props.plumb,
-                });
+                execAlign(horizontalDown);
               },
               label: '水平下对齐',
+            },
+            {
+              handler: () => {
+                execAlign(alignLeft);
+              },
+              label: '左对齐',
+            },
+            {
+              handler: () => {
+                execAlign(alignRight);
+              },
+              label: '右对齐',
+            },
+            {
+              handler: () => {
+                execAlign(horizontalEvenSpacing);
+              },
+              label: '水平等间距',
+            },
+            {
+              handler: () => {
+                execAlign(verticalEvenSpacing);
+              },
+              label: '垂直等间距',
             },
           ],
         },
@@ -551,7 +562,53 @@
   }
 
   // 节点右键
-  function showNodeContextMenu(e: MouseEvent) {
+  function showNodeContextMenu(e: MouseEvent, selectGroup?: INode[]) {
+    const group = selectGroup ?? unref(currentSelectGroup);
+    // 多选状态下提供组操作菜单
+    if (group.length > 1) {
+      createContextMenu({
+        event: e,
+        items: [
+          {
+            handler: () => {
+              execAlign(alignLeft);
+            },
+            label: '左对齐',
+          },
+          {
+            handler: () => {
+              execAlign(alignRight);
+            },
+            label: '右对齐',
+          },
+          {
+            handler: () => {
+              execAlign(horizontalEvenSpacing);
+            },
+            label: '水平等间距',
+          },
+          {
+            handler: () => {
+              execAlign(verticalEvenSpacing);
+            },
+            label: '垂直等间距',
+          },
+          {
+            handler: () => {
+              copyNode();
+            },
+            label: '复制',
+          },
+          {
+            handler: () => {
+              deleteNodes(group);
+            },
+            label: '批量删除',
+          },
+        ],
+      });
+      return;
+    }
     createContextMenu({
       event: e,
       items: [
@@ -582,10 +639,17 @@
 
   // 粘贴
   function paste() {
+    if (clipboard.nodes.length <= 0) {
+      message.warning('剪切板为空，请先复制节点！');
+      return;
+    }
+    const idMap: Recordable = {};
     let dis = 0;
-    clipboard.forEach((node: INode) => {
+    clipboard.nodes.forEach((node: INode) => {
       let newNode = Object.assign({}, node);
+      const oldId = newNode.id;
       newNode.id = newNode.type + '-' + utils.getId();
+      idMap[oldId] = newNode.id;
       let nodePos = computeNodePos(mouse.position.x + dis, mouse.position.y + dis);
       newNode.x = nodePos.x;
       newNode.y = nodePos.y;
@@ -593,6 +657,23 @@
       unref(flowData).nodeList.push(newNode);
       emits('update:data', unref(flowData));
     });
+    // 粘贴组内节点之间的连线
+    const newLinks = clipboard.links
+      .filter((link: ILink) => idMap[link.sourceId ?? ''] && idMap[link.targetId ?? ''])
+      .map((link: ILink) => ({
+        ...cloneDeep(link),
+        id: 'link-' + utils.getId(),
+        sourceId: idMap[link.sourceId ?? ''],
+        targetId: idMap[link.targetId ?? ''],
+      }));
+    if (newLinks.length > 0) {
+      emits('createLinks', newLinks);
+    }
+    message.success(
+      `已粘贴 ${clipboard.nodes.length} 个节点${
+        newLinks.length > 0 ? '和 ' + newLinks.length + ' 条连线' : ''
+      }！`,
+    );
   }
 
   // 全选
@@ -610,12 +691,31 @@
 
   // 复制节点
   function copyNode() {
-    clipboard = [];
+    let nodes: INode[] = [];
     if (unref(currentSelectGroup).length > 0) {
-      clipboard = Object.assign([], unref(currentSelectGroup));
-    } else if (unref(currentSelect).id) {
-      clipboard.push(unref(currentSelect) as INode);
+      nodes = Object.assign([], unref(currentSelectGroup));
+    } else if (unref(currentSelect)?.id && unref(currentSelect).type !== 'link') {
+      nodes.push(unref(currentSelect) as INode);
     }
+    if (nodes.length <= 0) {
+      message.warning('请先选择要复制的节点！');
+      return;
+    }
+    const nodeIds = nodes.map((node: INode) => node.id);
+    clipboard = {
+      nodes: cloneDeep(nodes),
+      links: cloneDeep(
+        unref(flowData).linkList.filter(
+          (link: ILink) =>
+            nodeIds.includes(link.sourceId ?? '') && nodeIds.includes(link.targetId ?? ''),
+        ),
+      ),
+    };
+    message.success(
+      `已复制 ${nodes.length} 个节点${
+        clipboard.links.length > 0 ? '和 ' + clipboard.links.length + ' 条连线' : ''
+      }！`,
+    );
   }
 
   // 查询删除节点关联的连接线
@@ -631,36 +731,46 @@
 
   // 删除节点
   function deleteNode() {
+    if (!unref(currentSelect)?.id) {
+      message.warning('请先选择要删除的节点！');
+      return;
+    }
+    deleteNodes([Object.assign({}, unref(currentSelect) as INode)]);
+  }
+
+  // 批量删除节点
+  function deleteNodes(nodes: INode[]) {
+    if (!nodes || nodes.length <= 0) {
+      message.warning('请先选择要删除的节点！');
+      return;
+    }
     let nodeList = unref(flowData).nodeList;
     let linkList = unref(flowData).linkList;
-    let arr: INode[] = [];
-
-    arr.push(Object.assign({}, unref(currentSelect) as INode));
 
     unref(flowData).status = FlowStatusEnum.LOADING;
 
-    arr.forEach((c) => {
+    nodes.forEach((c) => {
       let conns = getConnectionsByNodeId(c.id);
       conns.forEach((conn: Recordable) => {
-        linkList.splice(
-          linkList.findIndex(
-            (link: ILink) => link.sourceId === conn.sourceId && link.targetId === conn.targetId,
-          ),
-          1,
+        const linkIdx = linkList.findIndex(
+          (link: ILink) => link.sourceId === conn.sourceId && link.targetId === conn.targetId,
         );
-        props.plumb.deleteConnection(
-          props.plumb.getConnections({
-            source: conn.sourceId,
-            target: conn.targetId,
-          })[0],
-        );
+        if (linkIdx > -1) linkList.splice(linkIdx, 1);
+        const connObj = props.plumb.getConnections({
+          source: conn.sourceId,
+          target: conn.targetId,
+        })[0];
+        if (connObj) props.plumb.deleteConnection(connObj);
       });
       let inx = nodeList.findIndex((node: INode) => node.id === c.id);
-      nodeList.splice(inx, 1);
+      if (inx > -1) nodeList.splice(inx, 1);
     });
     unref(flowData).status = FlowStatusEnum.CREATE;
+    currentSelectGroup.value = [];
+    props.plumb.clearDragSelection();
     emits('update:data', unref(flowData));
     selectContainer();
+    message.success(`已删除 ${nodes.length} 个节点！`);
   }
 
   // 点击画布
@@ -739,6 +849,8 @@
   defineExpose({
     container,
     rectangleMultiple,
+    deleteNode,
+    deleteNodes,
   });
 
   watch(

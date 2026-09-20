@@ -270,8 +270,15 @@
   }
   // 节点右键
   function showNodeContextMenu(e: MouseEvent) {
-    emits('showNodeContextMenu', e);
-    selectNode();
+    // 右键的节点在多选组中时，保持多选状态以支持组操作
+    const inGroup = !!unref(currentSelectGroup).find((n) => n.id === currentNode.id);
+    if (inGroup) {
+      currentSelect.value = currentNode;
+    } else {
+      selectNode();
+    }
+    emits('update:select', unref(currentSelect));
+    emits('showNodeContextMenu', e, unref(currentSelectGroup));
   }
   // 节点是否激活
   function isActive() {
