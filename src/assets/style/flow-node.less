@@ -2,6 +2,57 @@
 @common-node-bg-hover: #f4f6fcb0;
 @common-node-active: #409eff;
 
+// 模拟运行：正在执行节点的呼吸高亮 + 放大动画
+@keyframes sim-breathing {
+  0% {
+    box-shadow: 0 0 0 0 rgb(64 158 255 / 70%);
+    transform: scale(1);
+  }
+
+  50% {
+    box-shadow: 0 0 16px 6px rgb(64 158 255 / 50%);
+    transform: scale(1.12);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgb(64 158 255 / 70%);
+    transform: scale(1);
+  }
+}
+
+// 网关节点自身带 rotate(45deg)，动画需保留旋转
+@keyframes sim-breathing-diamond {
+  0% {
+    box-shadow: 0 0 0 0 rgb(64 158 255 / 70%);
+    transform: rotate(45deg) scale(1);
+  }
+
+  50% {
+    box-shadow: 0 0 16px 6px rgb(64 158 255 / 50%);
+    transform: rotate(45deg) scale(1.12);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgb(64 158 255 / 70%);
+    transform: rotate(45deg) scale(1);
+  }
+}
+
+.sim-active {
+  z-index: 10;
+  outline: 2px solid @common-node-active !important;
+  animation: sim-breathing 1s ease-in-out infinite;
+}
+
+.common-diamond-node.sim-active {
+  animation: sim-breathing-diamond 1s ease-in-out infinite;
+}
+
+// 已执行过的节点
+.sim-done {
+  outline: 2px solid #52c41a;
+}
+
 .common-circle-node {
   position: absolute;
   height: 50px;

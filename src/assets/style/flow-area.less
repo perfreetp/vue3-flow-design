@@ -64,7 +64,45 @@
     right: 5px;
   }
 
+  // 模拟运行/回放期间的画布锁定遮罩
+  &__locked {
+    position: absolute;
+    inset: 0;
+    z-index: 9000;
+    cursor: not-allowed;
+    background: rgb(255 255 255 / 10%);
+  }
+
+  &__locked-tip {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 2px 12px;
+    color: #0960bd;
+    background: #e6f4ff;
+    border: 1px solid #91caff;
+    border-radius: 4px;
+    transform: translateX(-50%);
+  }
+
   .link-active {
     outline: 2px dashed @active-color;
   }
+}
+
+// 模拟运行：已执行连线的绿色流动样式
+@keyframes sim-link-flow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+.sim-link-flow path {
+  stroke: #52c41a !important;
+  stroke-width: 2.5px;
+  stroke-dasharray: 10 6;
+  animation: sim-link-flow 0.5s linear infinite;
 }

@@ -7,6 +7,10 @@
       <Toolbar
         :currentTool="currentTool"
         :flowData="flowData"
+        :simulating="simLocked"
+        :records="simRecords"
+        @startSimulation="startSimulation(flowData)"
+        @replay="startReplay"
         @generateFlowImage="
           generateFlowImage(
             flowData.nodeList,
@@ -33,15 +37,39 @@
           v-model:selectGroup="currentSelectGroup"
           :plumb="plumb"
           :currentTool="currentTool"
+          :locked="simLocked"
+          :lockMode="simState.mode"
           @selectTool="selectTool"
           @onShortcutKey="onShortcutKey"
           @saveFlow="saveFlow"
+        />
+        <!-- 运行日志面板 -->
+        <simulation-panel
+          :visible="simState.active"
+          :mode="simState.mode"
+          :status="simState.status"
+          :speed="simState.speed"
+          :recordName="simState.recordName"
+          :logs="simLogs"
+          @pause="pause"
+          @resume="resume"
+          @step="stepOnce"
+          @reset="reset"
+          @speedChange="setSpeed"
+          @save="saveRecord"
+          @close="exit"
         />
       </a-layout-content>
       <!-- 底部 -->
       <flow-footer />
     </a-layout>
-    <a-layout-sider width="250" theme="light" class="attr-area" @mousedown.stop="offShortcutKey">
+    <a-layout-sider
+      width="250"
+      theme="light"
+      class="attr-area"
+      :class="{ 'attr-area--locked': simLocked }"
+      @mousedown.stop="offShortcutKey"
+    >
       <!-- 组件属性区 -->
       <flow-attr :plumb="plumb" :flowData="flowData" v-model:select="currentSelect" />
     </a-layout-sider>
@@ -87,6 +115,7 @@
   import FlowElement from './modules/FlowElement.vue';
   import Toolbar from './modules/Toolbar.vue';
   import FlowFooter from './modules/FlowFooter.vue';
+  import SimulationPanel from './modules/SimulationPanel.vue';
   import { tools } from '/@/config/tools';
   import { IDragInfo, INode, ILink, ITool } from '/@/type/index';
   import { ActionsTypeEnum, LaneNodeTypeEnum, FlowStatusEnum } from '/@/type/enums';
@@ -94,6 +123,7 @@
   import { useContextMenu } from '/@/hooks/useContextMenu';
   import { useGenerateFlowImage } from '/@/hooks/useGenerateFlowImage';
   import { useShortcutKey } from '/@/hooks/useShortcutKey';
+  import { useFlowSimulation } from '/@/hooks/useFlowSimulation';
   import { flowConfig as defaultFlowConfig, settingConfig } from '/@/config/flow';
 
   const [createContextMenu] = useContextMenu();
@@ -104,6 +134,24 @@
 
   // 快捷键
   const { listenShortcutKey, offShortcutKey, onShortcutKey } = useShortcutKey();
+
+  // 流程模拟运行与回放
+  const {
+    simState,
+    simLogs,
+    simRecords,
+    simLocked,
+    loadRecords,
+    startSimulation,
+    startReplay,
+    pause,
+    resume,
+    stepOnce,
+    reset,
+    setSpeed,
+    saveRecord,
+    exit,
+  } = useFlowSimulation();
 
   // 流程配置
   const flowConfig = ref(cloneDeep(defaultFlowConfig));
@@ -160,6 +208,17 @@
     } else {
       loadFlow();
     }
+    // 加载当前流程的历史运行记录
+    loadRecords(flowData.attr.id);
+  }
+
+  // 运行/回放期间禁止编辑
+  function checkSimLocked() {
+    if (simLocked.value) {
+      message.warning('流程运行/回放中，画布已锁定！');
+      return true;
+    }
+    return false;
   }
 
   // 渲染流程
@@ -300,6 +359,7 @@
 
   // 设置工具
   function selectTool(type: ActionsTypeEnum) {
+    if (checkSimLocked()) return;
     let tool = tools.find((t) => t.type === type);
     if (tool) currentTool.value = tool;
 
@@ -356,6 +416,7 @@
 
   // 保存流程
   function saveFlow() {
+    if (checkSimLocked()) return;
     let flowObj = Object.assign({}, flowData);
 
     if (!checkFlow()) return;
@@ -372,6 +433,7 @@
 
   // 删除线
   function deleteLink() {
+    if (checkSimLocked()) return;
     let sourceId = (unref(currentSelect) as ILink)?.sourceId;
     let targetId = (unref(currentSelect) as ILink)?.targetId;
     unref(plumb).deleteConnection(
@@ -390,6 +452,7 @@
 
   // 键盘移动节点
   function moveNode(type: string) {
+    if (checkSimLocked()) return;
     let m = unref(flowConfig).defaultStyle.movePx,
       isX = true;
     switch (type) {
@@ -428,6 +491,7 @@
 
   // 清除画布
   function clear() {
+    if (checkSimLocked()) return;
     flowData.nodeList.forEach((node: INode) => {
       unref(plumb).remove(node.id);
     });

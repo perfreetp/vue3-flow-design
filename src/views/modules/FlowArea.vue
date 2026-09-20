@@ -71,6 +71,13 @@
       </a-button>
     </div>
     <div class="flow-area__position"> x: {{ mouse.position.x }}, y: {{ mouse.position.y }} </div>
+    <!-- 模拟运行/回放期间锁定画布 -->
+    <div v-if="locked" class="flow-area__locked">
+      <div class="flow-area__locked-tip">
+        <component :is="'LockOutlined'" />
+        流程{{ lockMode === 'replay' ? '回放' : '运行' }}中，画布已锁定
+      </div>
+    </div>
   </div>
 </template>
 
@@ -119,6 +126,14 @@
     dragInfo: {
       type: Object as PropType<IDragInfo>,
       default: () => ({}),
+    },
+    locked: {
+      type: Boolean,
+      default: false,
+    },
+    lockMode: {
+      type: String as PropType<'run' | 'replay'>,
+      default: 'run',
     },
   });
 
@@ -257,6 +272,10 @@
 
   // 组件拖拽入画布
   function handleDrop() {
+    if (props.locked) {
+      message.warning('流程运行/回放中，画布已锁定！');
+      return;
+    }
     // 复位拖拽工具
     emits('selectTool', ActionsTypeEnum.DRAG);
 

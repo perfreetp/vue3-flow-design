@@ -64,9 +64,16 @@
 }
 
 .flow-content {
+  position: relative;
   background: #fafafa;
   height: 100%;
   border: 1px dashed rgb(170 170 170 / 70%);
+}
+
+// 模拟运行/回放期间属性面板锁定
+.attr-area--locked {
+  pointer-events: none;
+  opacity: 0.55;
 }
 
 .flow-footer {

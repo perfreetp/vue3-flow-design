@@ -57,4 +57,28 @@ export interface IShortcutKey {
   shortcutName: string;
 }
 
+// 模拟运行步骤类型
+export type SimStepTypeEnum = 'node' | 'link' | 'end';
+
+// 模拟运行步骤
+export interface ISimStep {
+  type: SimStepTypeEnum;
+  id?: string;
+  name: string;
+}
+
+// 模拟运行日志
+export interface ISimLog {
+  time: string;
+  text: string;
+}
+
+// 模拟运行记录（用于回放）
+export interface ISimRecord {
+  id: string;
+  name: string;
+  time: number;
+  steps: ISimStep[];
+}
+
 export type ISettingConfig = typeof settingConfig;
