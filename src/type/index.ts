@@ -4,6 +4,7 @@ import {
   CommonNodeTypeEnum,
   HighNodeTypeEnum,
   LaneNodeTypeEnum,
+  SimFrameTypeEnum,
 } from './enums';
 
 import { settingConfig } from '../config/flow';
@@ -58,3 +59,36 @@ export interface IShortcutKey {
 }
 
 export type ISettingConfig = typeof settingConfig;
+
+// 单步模拟帧
+export interface ISimFrame {
+  type: SimFrameTypeEnum;
+  // NODE / LINK 时为对应元素ID
+  refId?: string;
+  // 用于渲染时解析名称（节点名/源->目标）
+  nodeName?: string;
+  // LINK 帧的来源、目标
+  sourceId?: string;
+  targetId?: string;
+  sourceName?: string;
+  targetName?: string;
+  // END 帧的日志文案
+  endText?: string;
+  // 记录时的真实时间戳
+  time: number;
+}
+
+// 运行日志条目
+export interface ISimLog {
+  time: number;
+  text: string;
+}
+
+// 历史运行记录
+export interface IRunRecord {
+  id: string;
+  flowId: string;
+  name: string;
+  savedAt: number;
+  frames: ISimFrame[];
+}

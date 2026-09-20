@@ -34,6 +34,7 @@
           <a-input
             placeholder="请输入节点名称"
             :value="(currentSelect as INode)?.nodeName"
+            :disabled="locked"
             @change="nodeNameChange"
           />
         </a-form-item>
@@ -59,7 +60,11 @@
           <a-input :value="(currentSelect as ILink)?.targetId" disabled />
         </a-form-item>
         <a-form-item label="文本">
-          <a-input :value="(currentSelect as ILink)?.label" @change="linkLabelChange" />
+          <a-input
+            :value="(currentSelect as ILink)?.label"
+            :disabled="locked"
+            @change="linkLabelChange"
+          />
         </a-form-item>
       </a-form>
     </a-tab-pane>
@@ -85,6 +90,10 @@
       type: Object as PropType<INode | ILink>,
       default: () => ({}),
     },
+    locked: {
+      type: Boolean,
+      default: false,
+    },
   });
 
   const emits = defineEmits(['update:select']);
@@ -95,6 +104,7 @@
 
   // 修改节点名称
   function nodeNameChange(e: ChangeEvent) {
+    if (props.locked) return;
     (currentSelect.value as INode).nodeName = e.target.value ?? '';
   }
 
@@ -110,6 +120,7 @@
 
   // 修改连接文本
   function linkLabelChange(e: ChangeEvent) {
+    if (props.locked) return;
     let label = e.target.value ?? '';
     (currentSelect.value as ILink).label = label;
     let conn = props.plumb.getConnections({

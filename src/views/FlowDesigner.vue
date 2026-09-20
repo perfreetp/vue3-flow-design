@@ -7,6 +7,7 @@
       <Toolbar
         :currentTool="currentTool"
         :flowData="flowData"
+        :records="sim.records"
         @generateFlowImage="
           generateFlowImage(
             flowData.nodeList,
@@ -14,6 +15,10 @@
             checkFlow,
           )
         "
+        @startRun="startRun"
+        @replay="replayRecord"
+        @deleteRecord="deleteRecord"
+        @clearRecords="clearRecords"
         @selectTool="selectTool"
         @clear="clear"
         @toggleShowGrid="toggleShowGrid"
@@ -33,9 +38,23 @@
           v-model:selectGroup="currentSelectGroup"
           :plumb="plumb"
           :currentTool="currentTool"
+          :simState="locked ? sim : null"
           @selectTool="selectTool"
           @onShortcutKey="onShortcutKey"
           @saveFlow="saveFlow"
+        />
+        <!-- 运行日志面板 -->
+        <RunLogPanel
+          v-if="locked"
+          :sim="sim"
+          :canSaveRecord="canSaveRecord"
+          :formatTime="formatTime"
+          @exit="exitSim"
+          @togglePause="togglePause"
+          @stepOnce="stepOnce"
+          @reset="resetSim"
+          @saveRecord="saveRecord"
+          @changeSpeed="changeSpeed"
         />
       </a-layout-content>
       <!-- 底部 -->
@@ -43,7 +62,12 @@
     </a-layout>
     <a-layout-sider width="250" theme="light" class="attr-area" @mousedown.stop="offShortcutKey">
       <!-- 组件属性区 -->
-      <flow-attr :plumb="plumb" :flowData="flowData" v-model:select="currentSelect" />
+      <flow-attr
+        :plumb="plumb"
+        :flowData="flowData"
+        :locked="locked"
+        v-model:select="currentSelect"
+      />
     </a-layout-sider>
   </a-layout>
 
@@ -75,7 +99,7 @@
 
 <script lang="ts" setup>
   import { jsPlumb } from 'jsplumb';
-  import { reactive, ref, onMounted, nextTick, unref } from 'vue';
+  import { reactive, ref, onMounted, nextTick, unref, watch } from 'vue';
   import { message } from 'ant-design-vue';
   import { cloneDeep } from 'lodash-es';
   import { ls } from 'vue-lsp';
@@ -87,11 +111,13 @@
   import FlowElement from './modules/FlowElement.vue';
   import Toolbar from './modules/Toolbar.vue';
   import FlowFooter from './modules/FlowFooter.vue';
+  import RunLogPanel from './modules/RunLogPanel.vue';
   import { tools } from '/@/config/tools';
   import { IDragInfo, INode, ILink, ITool } from '/@/type/index';
   import { ActionsTypeEnum, LaneNodeTypeEnum, FlowStatusEnum } from '/@/type/enums';
   import { utils, setFlowConfig } from '/@/utils/common';
   import { useContextMenu } from '/@/hooks/useContextMenu';
+  import { useFlowSimulation } from '/@/hooks/useFlowSimulation';
   import { useGenerateFlowImage } from '/@/hooks/useGenerateFlowImage';
   import { useShortcutKey } from '/@/hooks/useShortcutKey';
   import { flowConfig as defaultFlowConfig, settingConfig } from '/@/config/flow';
@@ -153,6 +179,25 @@
     belongTo: null,
   });
 
+  // 模拟运行 / 回放
+  const {
+    sim,
+    locked,
+    canSaveRecord,
+    formatTime,
+    startRun,
+    togglePause,
+    stepOnce,
+    reset: resetSim,
+    exit: exitSim,
+    changeSpeed,
+    saveRecord,
+    replay: replayRecord,
+    deleteRecord,
+    clearRecords,
+    loadRecords,
+  } = useFlowSimulation(flowData, plumb);
+
   // 初始化流程图
   function initFlow() {
     if (flowData.status === FlowStatusEnum.CREATE) {
@@ -164,6 +209,10 @@
 
   // 渲染流程
   async function loadFlow(str = '') {
+    if (unref(locked)) {
+      message.warning('运行/回放期间画布已锁定,请先退出后再载入流程!');
+      return;
+    }
     clear();
     await nextTick();
     const loadData = JSON.parse(str);
@@ -284,6 +333,10 @@
 
   // 连接线右键
   function showLinkContextMenu(e) {
+    if (unref(locked)) {
+      message.warning('运行/回放期间画布已锁定,退出后即可编辑!');
+      return;
+    }
     e.stopPropagation();
     createContextMenu({
       event: e,
@@ -300,6 +353,10 @@
 
   // 设置工具
   function selectTool(type: ActionsTypeEnum) {
+    if (unref(locked)) {
+      message.warning('运行/回放期间画布已锁定,退出后即可编辑!');
+      return;
+    }
     let tool = tools.find((t) => t.type === type);
     if (tool) currentTool.value = tool;
 
@@ -315,6 +372,7 @@
 
   // 切换为拖拽
   function changeToDrag() {
+    if (unref(locked)) return;
     flowData.nodeList.forEach((node: INode) => {
       let f = unref(plumb).toggleDraggable(node.id);
       if (!f) {
@@ -329,6 +387,7 @@
 
   // 切换为连线
   function changeToConnection() {
+    if (unref(locked)) return;
     flowData.nodeList.forEach((node: INode) => {
       let f = unref(plumb).toggleDraggable(node.id);
       if (f) {
@@ -356,6 +415,10 @@
 
   // 保存流程
   function saveFlow() {
+    if (unref(locked)) {
+      message.warning('运行/回放期间画布已锁定,请先退出!');
+      return;
+    }
     let flowObj = Object.assign({}, flowData);
 
     if (!checkFlow()) return;
@@ -370,8 +433,62 @@
     dragInfo.belongTo = info.belongTo;
   }
 
+  // 让指定节点变为可拖拽
+  function enableNodeDrag(nodeId: string) {
+    if (unref(plumb).isDraggable && !unref(plumb).isDraggable(nodeId)) {
+      unref(plumb).toggleDraggable(nodeId);
+    }
+  }
+
+  // 让指定节点变为不可拖拽
+  function disableNodeDrag(nodeId: string) {
+    if (unref(plumb).isDraggable && unref(plumb).isDraggable(nodeId)) {
+      unref(plumb).toggleDraggable(nodeId);
+    }
+  }
+
+  // 锁定画布:节点不可拖拽、不可再建立连线
+  function lockCanvas() {
+    flowData.nodeList.forEach((node: INode) => {
+      disableNodeDrag(node.id);
+      if (node.type !== LaneNodeTypeEnum.X_LANE && node.type !== LaneNodeTypeEnum.Y_LANE) {
+        unref(plumb).unmakeSource(node.id);
+        unref(plumb).unmakeTarget(node.id);
+      }
+    });
+  }
+
+  // 解锁画布:按当前工具恢复拖拽/连线能力
+  function unlockCanvas() {
+    if (currentTool.value.type === (ActionsTypeEnum.CONNECTION as string)) {
+      changeToConnection();
+    } else {
+      flowData.nodeList.forEach((node: INode) => {
+        enableNodeDrag(node.id);
+        if (node.type !== LaneNodeTypeEnum.X_LANE && node.type !== LaneNodeTypeEnum.Y_LANE) {
+          unref(plumb).unmakeSource(node.id);
+          unref(plumb).unmakeTarget(node.id);
+        }
+      });
+    }
+  }
+
+  // 运行/回放会话期间锁定画布,结束退出后恢复
+  watch(locked, (val) => {
+    if (val) {
+      lockCanvas();
+      clearSelect();
+    } else {
+      unlockCanvas();
+    }
+  });
+
   // 删除线
   function deleteLink() {
+    if (unref(locked)) {
+      message.warning('运行/回放期间画布已锁定,请先退出!');
+      return;
+    }
     let sourceId = (unref(currentSelect) as ILink)?.sourceId;
     let targetId = (unref(currentSelect) as ILink)?.targetId;
     unref(plumb).deleteConnection(
@@ -390,6 +507,7 @@
 
   // 键盘移动节点
   function moveNode(type: string) {
+    if (unref(locked)) return;
     let m = unref(flowConfig).defaultStyle.movePx,
       isX = true;
     switch (type) {
@@ -428,6 +546,10 @@
 
   // 清除画布
   function clear() {
+    if (unref(locked)) {
+      message.warning('运行/回放期间画布已锁定,请先退出!');
+      return;
+    }
     flowData.nodeList.forEach((node: INode) => {
       unref(plumb).remove(node.id);
     });
@@ -452,6 +574,10 @@
 
   // 测试
   function openTest() {
+    if (unref(locked)) {
+      message.warning('运行/回放期间画布已锁定,请先退出!');
+      return;
+    }
     testVisible.value = true;
   }
 
@@ -491,5 +617,8 @@
 
     // 初始化流程图
     initFlow();
+
+    // 读取本画布的历史运行记录
+    loadRecords();
   });
 </script>

@@ -50,3 +50,25 @@ export enum ActiveTypeEnum {
   CONNECTION = 'connection',
   NODE = 'node',
 }
+
+// 模拟运行状态
+export enum SimStatusEnum {
+  IDLE = 'idle', // 未开始 / 已退出
+  RUNNING = 'running', // 运行中
+  PAUSED = 'paused', // 已暂停
+  FINISHED = 'finished', // 已完成
+}
+
+// 模拟运行模式
+export enum SimModeEnum {
+  NONE = 'none',
+  RUN = 'run', // 模拟运行
+  REPLAY = 'replay', // 历史回放
+}
+
+// 模拟运行帧类型
+export enum SimFrameTypeEnum {
+  NODE = 'node', // 执行节点
+  LINK = 'link', // 经过连线
+  END = 'end', // 分支结束 / 流程结束
+}

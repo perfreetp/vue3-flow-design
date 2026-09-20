@@ -11,6 +11,8 @@
       active: isActive(),
       isStart: node.type === CommonNodeTypeEnum.START,
       isEnd: node.type === CommonNodeTypeEnum.END,
+      'sim-running': isSimRunning(),
+      'sim-visited': isSimVisited(),
     }"
     :style="{
       top: node.y + 'px',
@@ -31,7 +33,11 @@
     "
     :id="node.id"
     class="common-rectangle-node"
-    :class="{ active: isActive() }"
+    :class="{
+      active: isActive(),
+      'sim-running': isSimRunning(),
+      'sim-visited': isSimVisited(),
+    }"
     :style="{
       top: node.y + 'px',
       left: node.x + 'px',
@@ -48,7 +54,11 @@
     v-else-if="node.type === CommonNodeTypeEnum.GATEWAY"
     :id="node.id"
     class="common-diamond-node"
-    :class="{ active: isActive() }"
+    :class="{
+      active: isActive(),
+      'sim-running': isSimRunning(),
+      'sim-visited': isSimVisited(),
+    }"
     :style="{
       top: node.y + 'px',
       left: node.x + 'px',
@@ -139,6 +149,10 @@
     currentTool: {
       type: Object as PropType<ITool>,
       default: () => ({}),
+    },
+    simState: {
+      type: Object as PropType<Recordable | null>,
+      default: null,
     },
   });
 
@@ -281,6 +295,16 @@
     if (unref(currentSelect).id === currentNode.id) return true;
     let f = unref(currentSelectGroup).find((n) => n.id === currentNode.id);
     return !!f;
+  }
+
+  // 是否为正在执行的节点
+  function isSimRunning() {
+    return props.simState && props.simState.activeNodeId === currentNode.id;
+  }
+
+  // 是否已执行过
+  function isSimVisited() {
+    return props.simState && props.simState.visitedNodeIds.includes(currentNode.id);
   }
 
   watch(

@@ -21,6 +21,7 @@
         grid: flowData.config.showGrid,
         canDrag: container.dragFlag,
         canMultiple: rectangleMultiple.flag,
+        'sim-locked': isLocked(),
       }"
       :style="gridStyle"
       @click="containerHandler"
@@ -40,6 +41,7 @@
         v-model:select="currentSelect"
         v-model:selectGroup="currentSelectGroup"
         :currentTool="currentTool"
+        :simState="simState"
         @showNodeContextMenu="showNodeContextMenu"
         @isMultiple="isMultiple"
         @updateNodePos="updateNodePos"
@@ -119,6 +121,10 @@
     dragInfo: {
       type: Object as PropType<IDragInfo>,
       default: () => ({}),
+    },
+    simState: {
+      type: Object as PropType<Recordable | null>,
+      default: null,
     },
   });
 
@@ -210,6 +216,20 @@
   // 当前聚焦的连接线ID
   let tempLinkId = '';
 
+  // 运行/回放期间画布锁定
+  function isLocked() {
+    return !!props.simState;
+  }
+
+  // 锁定状态下拦截编辑操作
+  function lockedGuard() {
+    if (isLocked()) {
+      message.warning('运行/回放期间画布已锁定,退出后即可编辑!');
+      return true;
+    }
+    return false;
+  }
+
   // 剪切板内容
   let clipboard: INode[] = [];
 
@@ -257,6 +277,7 @@
 
   // 组件拖拽入画布
   function handleDrop() {
+    if (lockedGuard()) return;
     // 复位拖拽工具
     emits('selectTool', ActionsTypeEnum.DRAG);
 
@@ -370,6 +391,14 @@
   // 画布鼠标按下
   function mousedownHandler(e: MouseEvent) {
     if (e.button === 0) {
+      // 运行/回放期间仍允许空白拖拽平移画布,但禁止框选与多选
+      if (isLocked()) {
+        if (container.dragFlag) {
+          mouse.tempPos = mouse.position;
+          container.draging = true;
+        }
+        return;
+      }
       if (container.dragFlag) {
         mouse.tempPos = mouse.position;
         container.draging = true;
@@ -448,6 +477,7 @@
 
   // 画布右健
   function showContainerContextMenu(e: MouseEvent) {
+    if (lockedGuard()) return;
     createContextMenu({
       event: e,
       items: [
@@ -552,6 +582,7 @@
 
   // 节点右键
   function showNodeContextMenu(e: MouseEvent) {
+    if (lockedGuard()) return;
     createContextMenu({
       event: e,
       items: [
@@ -582,6 +613,7 @@
 
   // 粘贴
   function paste() {
+    if (lockedGuard()) return;
     let dis = 0;
     clipboard.forEach((node: INode) => {
       let newNode = Object.assign({}, node);
@@ -597,6 +629,7 @@
 
   // 全选
   function selectAll() {
+    if (lockedGuard()) return;
     unref(flowData).nodeList.forEach((node: INode) => {
       props.plumb.addToDragSelection(node.id);
       unref(currentSelectGroup).push(node);
@@ -610,6 +643,7 @@
 
   // 复制节点
   function copyNode() {
+    if (lockedGuard()) return;
     clipboard = [];
     if (unref(currentSelectGroup).length > 0) {
       clipboard = Object.assign([], unref(currentSelectGroup));
@@ -631,6 +665,7 @@
 
   // 删除节点
   function deleteNode() {
+    if (lockedGuard()) return;
     let nodeList = unref(flowData).nodeList;
     let linkList = unref(flowData).linkList;
     let arr: INode[] = [];
