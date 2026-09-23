@@ -61,6 +61,52 @@
         <a-form-item label="文本">
           <a-input :value="(currentSelect as ILink)?.label" @change="linkLabelChange" />
         </a-form-item>
+        <a-form-item label="走线方式">
+          <a-select
+            size="small"
+            :value="(currentSelect as ILink)?.cls?.linkType"
+            :options="linkTypeOptions"
+            @change="linkTypeChange"
+          />
+        </a-form-item>
+        <a-form-item label="线宽">
+          <a-slider
+            :min="1"
+            :max="10"
+            :value="(currentSelect as ILink)?.cls?.linkThickness"
+            @change="linkThicknessChange"
+          />
+        </a-form-item>
+        <a-form-item label="颜色">
+          <div @click="handleColorPicker">
+            <color-picker
+              :pureColor="(currentSelect as ILink)?.cls?.linkColor"
+              @update:pureColor="linkColorChange"
+            />
+          </div>
+        </a-form-item>
+        <a-form-item label="虚线样式">
+          <a-select
+            size="small"
+            :value="(currentSelect as ILink)?.cls?.linkDash || ''"
+            :options="linkDashOptions"
+            @change="linkDashChange"
+          />
+        </a-form-item>
+        <a-form-item label="箭头样式">
+          <a-select
+            size="small"
+            :value="(currentSelect as ILink)?.cls?.arrowStyle || 'arrow'"
+            :options="arrowStyleOptions"
+            @change="arrowStyleChange"
+          />
+        </a-form-item>
+        <a-form-item v-if="(currentSelect as ILink)?.waypoints?.length" label="拐点">
+          <a-space>
+            <a-tag color="blue">{{ (currentSelect as ILink)?.waypoints?.length }} 个拐点</a-tag>
+            <a-button size="small" danger @click="clearWaypoints">清除拐点</a-button>
+          </a-space>
+        </a-form-item>
       </a-form>
     </a-tab-pane>
   </a-tabs>
@@ -69,8 +115,18 @@
 <script lang="ts" setup>
   import { ChangeEvent } from 'ant-design-vue/lib/_util/EventInterface';
   import { ref, watch, unref, PropType } from 'vue';
+  import { message } from 'ant-design-vue';
+  import { ColorPicker } from 'vue3-colorpicker';
+  import 'vue3-colorpicker/style.css';
   import { INode, ILink, NodesType } from '/@/type/index';
   import { CommonNodeTypeEnum, ActiveTypeEnum } from '/@/type/enums';
+  import {
+    applyLinkStyle,
+    hasWaypoints,
+    linkTypeOptions,
+    linkDashOptions,
+    arrowStyleOptions,
+  } from '/@/utils/linkStyle';
 
   const props = defineProps({
     plumb: {
@@ -110,32 +166,63 @@
 
   // 修改连接文本
   function linkLabelChange(e: ChangeEvent) {
-    let label = e.target.value ?? '';
-    (currentSelect.value as ILink).label = label;
-    let conn = props.plumb.getConnections({
-      source: (unref(currentSelect) as ILink).sourceId,
-      target: (unref(currentSelect) as ILink).targetId,
-    })[0];
-    let link_id = conn.canvas.id;
-    let labelHandle = (e: Event) => {
-      e.stopPropagation();
-      currentSelect.value = props.flowData.linkList.find((l: ILink) => l.id === link_id);
-    };
+    (currentSelect.value as ILink).label = e.target.value ?? '';
+    applyLinkStyle(props.plumb, unref(currentSelect) as ILink);
+  }
 
-    if (label !== '') {
-      conn.setLabel({
-        label: label,
-        cssClass: `linkLabel ${link_id}`,
-      });
-      // 添加label点击事件
-      document.querySelector('.' + link_id)?.addEventListener('click', labelHandle);
-    } else {
-      // 移除label点击事件
-      document.querySelector('.' + link_id)?.removeEventListener('click', labelHandle);
+  // 手动触发resize，修复ColorPicker位置
+  function handleColorPicker() {
+    const evt = new Event('resize', { bubbles: true, cancelable: true });
+    window.dispatchEvent(evt);
+  }
 
-      let labelOverlay = conn.getLabelOverlay();
-      if (labelOverlay) conn.removeOverlay(labelOverlay.id);
+  // 应用连线样式并提示
+  function applyCurrentLinkStyle(tip?: string) {
+    applyLinkStyle(props.plumb, unref(currentSelect) as ILink);
+    if (tip) message.success(tip);
+  }
+
+  // 切换走线方式
+  function linkTypeChange(value: string) {
+    const link = unref(currentSelect) as ILink;
+    link.cls.linkType = value;
+    let tip = '走线方式已切换为「' + linkTypeOptions.find((o) => o.value === value)?.label + '」';
+    if (hasWaypoints(link)) {
+      link.waypoints = [];
+      tip += '，手动拐点已清除';
     }
+    applyCurrentLinkStyle(tip);
+  }
+
+  // 修改线宽
+  function linkThicknessChange(value: number) {
+    (unref(currentSelect) as ILink).cls.linkThickness = value;
+    applyCurrentLinkStyle();
+  }
+
+  // 修改颜色
+  function linkColorChange(value: string) {
+    (unref(currentSelect) as ILink).cls.linkColor = value;
+    applyCurrentLinkStyle();
+  }
+
+  // 修改虚线样式
+  function linkDashChange(value: string) {
+    (unref(currentSelect) as ILink).cls.linkDash = value;
+    applyCurrentLinkStyle('虚线样式已更新');
+  }
+
+  // 修改箭头样式
+  function arrowStyleChange(value: string) {
+    (unref(currentSelect) as ILink).cls.arrowStyle = value;
+    applyCurrentLinkStyle('箭头样式已更新');
+  }
+
+  // 清除全部拐点
+  function clearWaypoints() {
+    const link = unref(currentSelect) as ILink;
+    link.waypoints = [];
+    applyCurrentLinkStyle('已清除全部拐点，恢复自动走线');
   }
 
   watch(

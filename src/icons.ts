@@ -26,6 +26,13 @@ const ICON_LIST = [
   'EyeOutlined',
   'EyeInvisibleOutlined',
   'GithubOutlined',
+  'AppstoreOutlined',
+  'PartitionOutlined',
+  'EditOutlined',
+  'HomeOutlined',
+  'DoubleRightOutlined',
+  'FundProjectionScreenOutlined',
+  'PlusOutlined',
 ];
 
 export function registerIconsComp(app: App) {

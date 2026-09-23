@@ -2,6 +2,16 @@
   <a-layout class="flow-wrapper">
     <!-- 左侧边组件元素 -->
     <flow-element @setDragInfo="setDragInfo" />
+    <!-- 模板库 / 大纲面板 -->
+    <template-panel
+      :templates="customTemplates"
+      :outlineTree="outlineTree"
+      :selectNodeId="currentSelect?.type !== 'link' ? currentSelect?.id || '' : ''"
+      @setDragInfo="setDragInfo"
+      @locateNode="locateNode"
+      @renameTemplate="renameTemplateById"
+      @deleteTemplate="deleteTemplateById"
+    />
     <a-layout>
       <!-- 工具区 -->
       <Toolbar
@@ -22,6 +32,27 @@
         @shortcutHelper="shortcutHelper"
         @saveFlow="saveFlow"
       />
+      <!-- 子流程面包屑 -->
+      <div class="flow-breadcrumb" v-if="canvasStack.length > 0">
+        <a-breadcrumb>
+          <a-breadcrumb-item>
+            <a class="flow-breadcrumb__link" @click="exitToLevel(0)">
+              <component :is="'HomeOutlined'" />
+              主流程
+            </a>
+          </a-breadcrumb-item>
+          <a-breadcrumb-item v-for="(item, i) in canvasStack" :key="item.id">
+            <a
+              v-if="i < canvasStack.length - 1"
+              class="flow-breadcrumb__link"
+              @click="exitToLevel(i + 1)"
+            >
+              {{ item.name }}
+            </a>
+            <span v-else>{{ item.name }}</span>
+          </a-breadcrumb-item>
+        </a-breadcrumb>
+      </div>
       <!-- 画布区 -->
       <a-layout-content class="flow-content">
         <flow-area
@@ -36,6 +67,9 @@
           @selectTool="selectTool"
           @onShortcutKey="onShortcutKey"
           @saveFlow="saveFlow"
+          @saveAsTemplate="saveAsTemplate"
+          @enterSubflow="enterSubflow"
+          @linkContextMenu="showLayerLinkContextMenu"
         />
       </a-layout-content>
       <!-- 底部 -->
@@ -71,16 +105,47 @@
 
   <!-- 测试 -->
   <TestModal v-model:testVisible="testVisible" :flowData="flowData" @loadFlow="loadFlow" />
+
+  <!-- 另存为模板 -->
+  <a-modal
+    v-model:visible="templateModalVisible"
+    title="另存为模板"
+    okText="保存"
+    cancelText="取消"
+    @ok="confirmSaveTemplate"
+  >
+    <a-input
+      v-model:value="templateName"
+      placeholder="请输入模板名称"
+      @pressEnter="confirmSaveTemplate"
+    />
+  </a-modal>
+
+  <!-- 编辑连线标签 -->
+  <a-modal
+    v-model:visible="linkLabelModalVisible"
+    title="编辑连线标签"
+    okText="确认"
+    cancelText="取消"
+    @ok="confirmEditLinkLabel"
+  >
+    <a-input
+      v-model:value="linkLabelValue"
+      placeholder="请输入连线标签文本"
+      @pressEnter="confirmEditLinkLabel"
+    />
+  </a-modal>
 </template>
 
 <script lang="ts" setup>
   import { jsPlumb } from 'jsplumb';
-  import { reactive, ref, onMounted, nextTick, unref } from 'vue';
+  import { reactive, ref, computed, onMounted, nextTick, unref } from 'vue';
   import { message } from 'ant-design-vue';
   import { cloneDeep } from 'lodash-es';
   import { ls } from 'vue-lsp';
   import FlowArea from './modules/FlowArea.vue';
   import FlowAttr from './modules/FlowAttr.vue';
+  import TemplatePanel from './modules/TemplatePanel.vue';
   import SettingModal from './modules/SettingModal.vue';
   import ShortcutKeyModal from './modules/ShortcutKeyModal.vue';
   import TestModal from './modules/TestModal.vue';
@@ -94,7 +159,14 @@
   import { useContextMenu } from '/@/hooks/useContextMenu';
   import { useGenerateFlowImage } from '/@/hooks/useGenerateFlowImage';
   import { useShortcutKey } from '/@/hooks/useShortcutKey';
+  import { useTemplates } from '/@/hooks/useTemplates';
   import { flowConfig as defaultFlowConfig, settingConfig } from '/@/config/flow';
+  import {
+    applyLinkStyle,
+    connectLink,
+    bindLinkLabel,
+    registerLinkInteractionBinder,
+  } from '/@/utils/linkStyle';
 
   const [createContextMenu] = useContextMenu();
 
@@ -104,6 +176,14 @@
 
   // 快捷键
   const { listenShortcutKey, offShortcutKey, onShortcutKey } = useShortcutKey();
+
+  // 自定义节点模板
+  const {
+    templates: customTemplates,
+    addTemplate,
+    renameTemplate,
+    deleteTemplate,
+  } = useTemplates();
 
   // 流程配置
   const flowConfig = ref(cloneDeep(defaultFlowConfig));
@@ -151,7 +231,41 @@
   const dragInfo = reactive<IDragInfo>({
     type: null,
     belongTo: null,
+    template: null,
   });
+
+  // 子流程画布层级栈
+  const canvasStack = ref<{ id: string; name: string; nodeList: INode[]; linkList: ILink[] }[]>([]);
+
+  // 另存为模板弹窗
+  const templateModalVisible = ref<boolean>(false);
+  const templateName = ref<string>('');
+  let pendingTemplateNode: INode | null = null;
+
+  // 编辑连线标签弹窗
+  const linkLabelModalVisible = ref<boolean>(false);
+  const linkLabelValue = ref<string>('');
+
+  // 主流程节点列表（进入子流程后取栈底）
+  const rootNodeList = computed<INode[]>(() =>
+    canvasStack.value.length > 0 ? canvasStack.value[0].nodeList : flowData.nodeList,
+  );
+
+  // 大纲树数据（含子流程层级）
+  const outlineTree = computed<Recordable[]>(() => buildOutlineTree(rootNodeList.value, []));
+
+  function buildOutlineTree(nodeList: INode[], path: string[]): Recordable[] {
+    return (nodeList || []).map((node: INode) => ({
+      key: node.id,
+      title: `${node.nodeName}（${node.type}）`,
+      nodeId: node.id,
+      path,
+      children:
+        node.isSubflow && node.subflow
+          ? buildOutlineTree(node.subflow.nodeList, [...path, node.id])
+          : [],
+    }));
+  }
 
   // 初始化流程图
   function initFlow() {
@@ -165,6 +279,7 @@
   // 渲染流程
   async function loadFlow(str = '') {
     clear();
+    canvasStack.value = [];
     await nextTick();
     const loadData = JSON.parse(str);
     flowData.attr = loadData.attr;
@@ -179,36 +294,7 @@
       await nextTick();
       const linkList = loadData.linkList;
       linkList.forEach((link: ILink) => {
-        flowData.linkList.push(link);
-        let conn = unref(plumb).connect({
-          source: link.sourceId,
-          target: link.targetId,
-          anchor: unref(flowConfig).jsPlumbConfig.anchor.default,
-          connector: [link.cls.linkType, unref(flowConfig).jsPlumbInsConfig.Connector?.[1]],
-          paintStyle: {
-            stroke: link.cls.linkColor,
-            strokeWidth: link.cls.linkThickness,
-          },
-        });
-        let link_id = conn.canvas.id;
-        let link_dom = document.querySelector('.' + link_id);
-        let labelHandle = (e: Event) => {
-          e.stopPropagation();
-          currentSelect.value = flowData.linkList.find((l: ILink) => l.id === link_id);
-        };
-
-        if (link.label !== '') {
-          conn.setLabel({
-            label: link.label,
-            cssClass: `linkLabel ${link_id}`,
-          });
-
-          // 添加label点击事件
-          link_dom?.addEventListener('click', labelHandle);
-        } else {
-          // 移除label点击事件
-          link_dom?.removeEventListener('click', labelHandle);
-        }
+        renderLink(link);
       });
 
       clearSelect();
@@ -219,6 +305,13 @@
       top: 0,
       left: 0,
     };
+  }
+
+  // 渲染一条连线（jsPlumb 连接 + 样式 + 标签）
+  function renderLink(link: ILink) {
+    flowData.linkList.push(link);
+    connectLink(unref(plumb), link, unref(flowConfig).jsPlumbConfig.anchor.default);
+    applyLinkStyle(unref(plumb), link);
   }
 
   // 实例化JsPlumb
@@ -263,16 +356,10 @@
         linkType: unref(flowConfig).jsPlumbInsConfig.Connector?.[0],
         linkColor: unref(flowConfig).jsPlumbInsConfig.PaintStyle?.stroke,
         linkThickness: unref(flowConfig).jsPlumbInsConfig.PaintStyle?.strokeWidth,
+        linkDash: '',
+        arrowStyle: 'arrow',
       };
-      document.querySelector('#' + id)?.addEventListener('contextmenu', (e: Event) => {
-        showLinkContextMenu(e);
-        currentSelect.value = flowData.linkList.find((l: ILink) => l.id === id);
-      });
-
-      document.querySelector('#' + id)?.addEventListener('click', (e: Event) => {
-        e.stopPropagation();
-        currentSelect.value = flowData.linkList.find((l: ILink) => l.id === id);
-      });
+      bindLinkInteractions(connObj, id);
 
       if (flowData.status !== FlowStatusEnum.LOADING) flowData.linkList.push(o);
     });
@@ -280,14 +367,68 @@
     unref(plumb).importDefaults({
       ConnectionsDetachable: unref(flowConfig).jsPlumbConfig.conn.isDetachable,
     });
+
+    // setConnector 重建 canvas 后重新绑定交互事件
+    registerLinkInteractionBinder((conn: Recordable, link: ILink) => {
+      bindLinkInteractions(conn.canvas, link.id);
+      bindLinkLabel(
+        conn,
+        link,
+        (linkId: string) => {
+          currentSelect.value = flowData.linkList.find((l: ILink) => l.id === linkId);
+        },
+        (e: MouseEvent) => {
+          showLinkContextMenu(e);
+        },
+      );
+    });
+  }
+
+  // 绑定连线交互事件（点击选中/右键菜单/双击插点）
+  function bindLinkInteractions(canvas: HTMLElement, linkId: string) {
+    canvas?.addEventListener('contextmenu', (e: Event) => {
+      currentSelect.value = flowData.linkList.find((l: ILink) => l.id === linkId);
+      showLinkContextMenu(e as MouseEvent);
+    });
+
+    canvas?.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      currentSelect.value = flowData.linkList.find((l: ILink) => l.id === linkId);
+    });
+
+    // 双击连线空白处快速插入拐点
+    canvas?.addEventListener('dblclick', (e: Event) => {
+      e.stopPropagation();
+      insertWaypointAt(e as MouseEvent, linkId);
+    });
   }
 
   // 连接线右键
-  function showLinkContextMenu(e) {
+  function showLinkContextMenu(e: MouseEvent) {
     e.stopPropagation();
+    const link = unref(currentSelect) as ILink;
     createContextMenu({
       event: e,
       items: [
+        {
+          handler: () => {
+            insertWaypointAt(e, (unref(currentSelect) as ILink)?.id);
+          },
+          label: '插入拐点',
+        },
+        {
+          handler: () => {
+            openEditLinkLabel();
+          },
+          label: '编辑标签',
+        },
+        {
+          handler: () => {
+            clearLinkWaypoints();
+          },
+          label: '清除拐点',
+          hidden: !link?.waypoints || link.waypoints.length === 0,
+        },
         {
           handler: () => {
             deleteLink();
@@ -296,6 +437,90 @@
         },
       ],
     });
+  }
+
+  // 拐点走线层连线右键
+  function showLayerLinkContextMenu(payload: { event: MouseEvent; link: ILink }) {
+    currentSelect.value = payload.link;
+    showLinkContextMenu(payload.event);
+  }
+
+  // 鼠标事件坐标转画布坐标
+  function toCanvasPos(e: MouseEvent) {
+    const containerEl = document.querySelector('#flowContainer') as HTMLElement;
+    const rect = containerEl.getBoundingClientRect();
+    const scale = unref(flowAreaRef).container.scale;
+    return {
+      x: (e.clientX - rect.left) / scale,
+      y: (e.clientY - rect.top) / scale,
+    };
+  }
+
+  // 在指定位置插入拐点
+  function insertWaypointAt(e: MouseEvent, linkId?: string) {
+    const link = flowData.linkList.find((l: ILink) => l.id === linkId);
+    if (!link) return;
+    const pos = toCanvasPos(e);
+    if (!link.waypoints) link.waypoints = [];
+    // 计算插入位置（最近线段）
+    const nodeOf = (id?: string) => flowData.nodeList.find((n: INode) => n.id === id);
+    const centerOf = (n?: INode) =>
+      n ? { x: n.x + n.width / 2, y: n.y + n.height / 2 } : { x: 0, y: 0 };
+    const pts = [
+      centerOf(nodeOf(link.sourceId)),
+      ...link.waypoints,
+      centerOf(nodeOf(link.targetId)),
+    ];
+    let minDist = Infinity;
+    let insertInx = pts.length - 1;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy;
+      let t = lenSq === 0 ? 0 : ((pos.x - a.x) * dx + (pos.y - a.y) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const d = Math.hypot(pos.x - (a.x + t * dx), pos.y - (a.y + t * dy));
+      if (d < minDist) {
+        minDist = d;
+        insertInx = i;
+      }
+    }
+    link.waypoints.splice(insertInx, 0, pos);
+    applyLinkStyle(unref(plumb), link);
+    currentSelect.value = link;
+    message.success('已插入拐点，可拖拽调整位置，双击拐点可删除');
+  }
+
+  // 清除连线全部拐点
+  function clearLinkWaypoints() {
+    const link = unref(currentSelect) as ILink;
+    if (!link?.id) return;
+    link.waypoints = [];
+    applyLinkStyle(unref(plumb), link);
+    message.success('已清除全部拐点，恢复自动走线');
+  }
+
+  // 打开编辑连线标签弹窗
+  function openEditLinkLabel() {
+    const link = unref(currentSelect) as ILink;
+    if (!link?.id) return;
+    linkLabelValue.value = link.label || '';
+    linkLabelModalVisible.value = true;
+  }
+
+  // 确认编辑连线标签
+  function confirmEditLinkLabel() {
+    const link = unref(currentSelect) as ILink;
+    if (!link?.id) {
+      linkLabelModalVisible.value = false;
+      return;
+    }
+    link.label = linkLabelValue.value.trim();
+    applyLinkStyle(unref(plumb), link);
+    linkLabelModalVisible.value = false;
+    message.success('连线标签已更新');
   }
 
   // 设置工具
@@ -368,6 +593,7 @@
   function setDragInfo(info: IDragInfo) {
     dragInfo.type = info.type;
     dragInfo.belongTo = info.belongTo;
+    dragInfo.template = info.template ?? null;
   }
 
   // 删除线
@@ -434,12 +660,139 @@
     clearSelect();
     flowData.nodeList = [];
     flowData.linkList = [];
+    canvasStack.value = [];
   }
 
   // 清除当前选择节点
   function clearSelect() {
     currentSelect.value = undefined;
     currentSelectGroup.value = [];
+  }
+
+  // 卸载当前层画布的 jsPlumb 内容
+  function detachCurrentLevel() {
+    flowData.nodeList.forEach((node: INode) => {
+      unref(plumb).remove(node.id);
+    });
+    clearSelect();
+  }
+
+  // 渲染当前层连线
+  function renderCurrentLevelLinks(linkList: ILink[]) {
+    flowData.status = FlowStatusEnum.LOADING;
+    flowData.linkList = [];
+    linkList.forEach((link: ILink) => {
+      renderLink(link);
+    });
+    flowData.status = FlowStatusEnum.MODIFY;
+  }
+
+  // 重新应用当前工具（拖拽/连线）到画布节点
+  function reapplyCurrentTool() {
+    if (currentTool.value.type === ActionsTypeEnum.CONNECTION) {
+      changeToConnection();
+    } else {
+      changeToDrag();
+    }
+  }
+
+  // 进入子流程
+  async function enterSubflow(node: INode, silent = false) {
+    if (!node.isSubflow) return;
+    if (!node.subflow) {
+      node.subflow = { nodeList: [], linkList: [] };
+    }
+    const subflowLinks = node.subflow.linkList;
+    detachCurrentLevel();
+    canvasStack.value.push({
+      id: node.id,
+      name: node.nodeName,
+      nodeList: flowData.nodeList,
+      linkList: flowData.linkList,
+    });
+    flowData.nodeList = node.subflow.nodeList;
+    flowData.linkList = [];
+    await nextTick();
+    renderCurrentLevelLinks(subflowLinks);
+    reapplyCurrentTool();
+    unref(flowAreaRef).container.pos = { top: 0, left: 0 };
+    if (!silent) message.info(`已进入子流程「${node.nodeName}」，可通过顶部面包屑返回上层`);
+  }
+
+  // 返回到指定层级（0 为主流程）
+  async function exitToLevel(index: number, silent = false) {
+    if (index >= canvasStack.value.length) return;
+    const target = canvasStack.value[index];
+    detachCurrentLevel();
+    canvasStack.value.splice(index);
+    flowData.nodeList = target.nodeList;
+    flowData.linkList = [];
+    await nextTick();
+    renderCurrentLevelLinks(target.linkList);
+    reapplyCurrentTool();
+    unref(flowAreaRef).container.pos = { top: 0, left: 0 };
+    if (!silent) {
+      message.info(index === 0 ? '已返回主流程' : `已返回子流程「${target.name}」所在层级`);
+    }
+  }
+
+  // 大纲树定位节点
+  async function locateNode(payload: { path: string[]; nodeId: string }) {
+    const { path, nodeId } = payload;
+    // 先回到主流程
+    if (canvasStack.value.length > 0) {
+      await exitToLevel(0, true);
+    }
+    // 逐层进入目标所在子流程
+    for (const subflowId of path) {
+      const node = flowData.nodeList.find((n: INode) => n.id === subflowId);
+      if (node) {
+        await enterSubflow(node, true);
+      }
+    }
+    await nextTick();
+    const target = flowData.nodeList.find((n: INode) => n.id === nodeId);
+    if (target) {
+      unref(flowAreaRef).focusNode(target);
+      currentSelect.value = target;
+      message.info(`已定位到节点「${target.nodeName}」`);
+    }
+  }
+
+  // 另存为模板
+  function saveAsTemplate(node: INode) {
+    if (!node?.id) return;
+    pendingTemplateNode = node;
+    templateName.value = node.nodeName + '模板';
+    templateModalVisible.value = true;
+  }
+
+  // 确认保存模板
+  function confirmSaveTemplate() {
+    if (!templateName.value.trim()) {
+      message.warning('模板名称不能为空！');
+      return;
+    }
+    if (pendingTemplateNode) {
+      const tplNode = cloneDeep(pendingTemplateNode) as Recordable;
+      delete tplNode.id;
+      delete tplNode.x;
+      delete tplNode.y;
+      addTemplate(templateName.value.trim(), tplNode);
+      message.success('模板保存成功，已加入模板库「自定义模板」分类');
+    }
+    templateModalVisible.value = false;
+    pendingTemplateNode = null;
+  }
+
+  // 重命名模板
+  function renameTemplateById({ id, name }: { id: string; name: string }) {
+    renameTemplate(id, name);
+  }
+
+  // 删除模板
+  function deleteTemplateById(id: string) {
+    deleteTemplate(id);
   }
 
   // 显示隐藏网格

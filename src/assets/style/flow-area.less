@@ -68,3 +68,85 @@
     outline: 2px dashed @active-color;
   }
 }
+
+// 小地图
+.flow-minimap {
+  position: absolute;
+  right: 10px;
+  bottom: 24px;
+  width: 180px;
+  height: 120px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 15%);
+  overflow: hidden;
+  z-index: 1000;
+  cursor: pointer;
+
+  &__node {
+    position: absolute;
+    background: #91caff;
+    border-radius: 1px;
+
+    &.subflow {
+      background: #ffa940;
+    }
+  }
+
+  &__viewport {
+    position: absolute;
+    border: 1.5px solid #409eff;
+    background: rgb(64 158 255 / 10%);
+    cursor: move;
+  }
+}
+
+// 拐点走线层
+.link-waypoint-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 4;
+
+  .wp-link-path {
+    pointer-events: none;
+
+    &.active {
+      stroke: #409eff;
+    }
+  }
+
+  .wp-link-hit {
+    pointer-events: stroke;
+    cursor: pointer;
+  }
+}
+
+// 拐点手柄
+.link-waypoint-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  margin-top: -5px;
+  background: #fff;
+  border: 2px solid #409eff;
+  border-radius: 50%;
+  cursor: move;
+  z-index: 5;
+
+  &:hover {
+    background: #409eff;
+  }
+}
+
+// 拐点走线文本标签
+.link-waypoint-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  z-index: 5;
+}

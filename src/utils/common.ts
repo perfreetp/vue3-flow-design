@@ -128,3 +128,29 @@ export function setFlowConfig(config, settingConfig) {
 
   return config;
 }
+
+// 重新生成节点（含子流程内部节点与连线）的ID，用于模板实例化
+export function regenerateNodeIds(node: Recordable) {
+  const idMap: Recordable = {};
+  const subflows: Recordable[] = [];
+
+  const assignNodeId = (n: Recordable) => {
+    const oldId = n.id;
+    n.id = n.type + '-' + utils.getId();
+    if (oldId) idMap[oldId] = n.id;
+    if (n.subflow) {
+      subflows.push(n.subflow);
+      (n.subflow.nodeList || []).forEach(assignNodeId);
+    }
+  };
+
+  assignNodeId(node);
+
+  subflows.forEach((sf) => {
+    (sf.linkList || []).forEach((link: Recordable) => {
+      link.id = 'link-' + utils.getId();
+      if (idMap[link.sourceId]) link.sourceId = idMap[link.sourceId];
+      if (idMap[link.targetId]) link.targetId = idMap[link.targetId];
+    });
+  });
+}

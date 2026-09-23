@@ -105,3 +105,76 @@
   opacity: 0.8;
   z-index: 3;
 }
+
+// 模板库 / 大纲面板
+.template-panel {
+  border-right: 1px solid #e8e8e8;
+  box-shadow: 3px 0 10px #eee;
+  position: relative;
+  z-index: 9999;
+
+  &__tabs {
+    height: 100%;
+    padding: 0 6px;
+
+    .ant-tabs-content {
+      height: calc(100% - 46px);
+      overflow-y: auto;
+    }
+  }
+
+  .tpl-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    margin-bottom: 4px;
+    border: 1px dashed #d9d9d9;
+    border-radius: 4px;
+    cursor: move;
+    background: #fff;
+
+    &:hover {
+      border-color: #0960bd;
+      color: #0960bd;
+    }
+
+    &__icon {
+      margin-right: 6px;
+    }
+
+    &__name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &__actions {
+      display: none;
+
+      > span {
+        margin-left: 6px;
+        cursor: pointer;
+      }
+    }
+
+    &:hover .tpl-item__actions {
+      display: inline-flex;
+    }
+  }
+}
+
+// 子流程面包屑
+.flow-breadcrumb {
+  height: 32px;
+  line-height: 32px;
+  padding: 0 12px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  position: relative;
+  z-index: 99;
+
+  &__link {
+    cursor: pointer;
+  }
+}

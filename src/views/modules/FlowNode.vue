@@ -18,9 +18,11 @@
       cursor: setCursor(currentTool.type),
     }"
     @click.stop="selectNode"
+    @dblclick.stop="nodeDblclick"
     @contextmenu.stop="showNodeContextMenu"
   >
     {{ node.nodeName }}
+    <span v-if="node.isSubflow" class="subflow-badge">{{ subflowCount }}</span>
   </div>
 
   <div
@@ -38,10 +40,12 @@
       cursor: setCursor(currentTool.type),
     }"
     @click.stop="selectNode"
+    @dblclick.stop="nodeDblclick"
     @contextmenu.stop="showNodeContextMenu"
   >
     <component :is="setIcon(node.type)" class="node-icon" />
     {{ node.nodeName }}
+    <span v-if="node.isSubflow" class="subflow-badge">{{ subflowCount }}</span>
   </div>
 
   <div
@@ -55,8 +59,12 @@
       cursor: setCursor(currentTool.type),
     }"
     @click.stop="selectNode"
+    @dblclick.stop="nodeDblclick"
     @contextmenu.stop="showNodeContextMenu"
   >
+    <span v-if="node.isSubflow" class="subflow-badge subflow-badge--diamond">{{
+      subflowCount
+    }}</span>
   </div>
 
   <div
@@ -105,7 +113,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { ref, unref, watch, onMounted, PropType, reactive } from 'vue';
+  import { ref, unref, watch, computed, onMounted, PropType, reactive } from 'vue';
   import { Resizable } from 'resizable-dom';
   import {
     CommonNodeTypeEnum,
@@ -150,6 +158,7 @@
     'hideAlignLine',
     'isMultiple',
     'showNodeContextMenu',
+    'nodeDblclick',
   ]);
 
   // 流程配置
@@ -163,6 +172,9 @@
 
   // 当前选择的节点组
   const currentSelectGroup = ref(props.selectGroup);
+
+  // 子流程内部节点数量
+  const subflowCount = computed(() => currentNode.subflow?.nodeList?.length ?? 0);
 
   // 设置ICON
   function setIcon(type: NodesType) {
@@ -209,6 +221,9 @@
       },
       grid: flowConfig.defaultStyle.alignGridPX,
       drag: (e) => {
+        // 实时更新坐标，驱动拐点走线层重绘
+        currentNode.x = e.pos[0];
+        currentNode.y = e.pos[1];
         if (flowConfig.defaultStyle.isOpenAuxiliaryLine) {
           emits('alignForLine', e);
         }
@@ -270,8 +285,12 @@
   }
   // 节点右键
   function showNodeContextMenu(e: MouseEvent) {
-    emits('showNodeContextMenu', e);
     selectNode();
+    emits('showNodeContextMenu', e, currentNode);
+  }
+  // 双击节点
+  function nodeDblclick() {
+    emits('nodeDblclick', currentNode);
   }
   // 节点是否激活
   function isActive() {

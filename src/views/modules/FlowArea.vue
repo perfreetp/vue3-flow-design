@@ -1,5 +1,5 @@
 <template>
-  <div class="flow-area" @dragover="handleDragover" @drop="handleDrop">
+  <div class="flow-area" ref="flowAreaElRef" @dragover="handleDragover" @drop="handleDrop">
     <!--辅助线X-->
     <div
       v-if="container.auxiliaryLine.isOpen && container.auxiliaryLine.isShowXLine"
@@ -41,10 +41,20 @@
         v-model:selectGroup="currentSelectGroup"
         :currentTool="currentTool"
         @showNodeContextMenu="showNodeContextMenu"
+        @nodeDblclick="nodeDblclick"
         @isMultiple="isMultiple"
         @updateNodePos="updateNodePos"
         @alignForLine="alignForLine"
         @hideAlignLine="hideAlignLine"
+      />
+      <!-- 连线拐点走线层 -->
+      <link-waypoint-layer
+        :flowData="flowData"
+        :scale="container.scale"
+        :select="currentSelect"
+        @selectLink="selectLinkFromLayer"
+        @styleChange="onLinkStyleChange"
+        @linkContextMenu="onLinkContextMenu"
       />
       <div
         class="flow-area__multiple"
@@ -57,6 +67,16 @@
         }"
       ></div>
     </div>
+    <!-- 小地图 -->
+    <flow-minimap
+      :nodeList="flowData.nodeList"
+      :pos="container.pos"
+      :scale="container.scale"
+      :scaleOrigin="container.scaleOrigin"
+      :areaWidth="areaSize.width"
+      :areaHeight="areaSize.height"
+      @moveTo="minimapMoveTo"
+    />
     <div class="flow-area__scale">
       <a-button size="small" type="default" @click="narrowContainer">
         <template #icon>
@@ -71,15 +91,34 @@
       </a-button>
     </div>
     <div class="flow-area__position"> x: {{ mouse.position.x }}, y: {{ mouse.position.y }} </div>
+
+    <!-- 删除子流程节点确认 -->
+    <a-modal
+      v-model:visible="subflowDeleteVisible"
+      title="删除子流程节点"
+      :closable="false"
+      @mousedown.stop
+    >
+      <p>该节点包含 {{ subflowDeleteCount }} 个内部节点，是否连带删除内部内容？</p>
+      <template #footer>
+        <a-button @click="subflowDeleteVisible = false">取消</a-button>
+        <a-button @click="confirmDeleteSubflow(false)">保留内部节点</a-button>
+        <a-button type="primary" danger @click="confirmDeleteSubflow(true)">连带删除</a-button>
+      </template>
+    </a-modal>
   </div>
 </template>
 
 <script lang="ts" setup>
-  import { reactive, ref, computed, watch, unref, PropType } from 'vue';
+  import { reactive, ref, computed, watch, unref, nextTick, onMounted, PropType } from 'vue';
   import { message } from 'ant-design-vue';
-  import { utils } from '/@/utils/common';
+  import { cloneDeep } from 'lodash-es';
+  import { utils, regenerateNodeIds } from '/@/utils/common';
   import FlowNode from './FlowNode.vue';
+  import LinkWaypointLayer from './LinkWaypointLayer.vue';
+  import FlowMinimap from './FlowMinimap.vue';
   import { useContextMenu } from '/@/hooks/useContextMenu';
+  import { applyLinkStyle, getConnectorParams } from '/@/utils/linkStyle';
   import {
     CommonNodeTypeEnum,
     LaneNodeTypeEnum,
@@ -126,6 +165,9 @@
     'selectTool',
     'onShortcutKey',
     'saveFlow',
+    'saveAsTemplate',
+    'enterSubflow',
+    'linkContextMenu',
     'update:select',
     'update:selectGroup',
     'update:data',
@@ -260,7 +302,25 @@
     // 复位拖拽工具
     emits('selectTool', ActionsTypeEnum.DRAG);
 
+    // 从模板库拖入自定义模板
+    if (props.dragInfo.template) {
+      addTemplateNode(props.dragInfo.template);
+      return;
+    }
+
     findNodeConfig(props.dragInfo);
+  }
+
+  // 从自定义模板生成节点
+  function addTemplateNode(template: Recordable) {
+    const newNode = cloneDeep(template) as INode;
+    regenerateNodeIds(newNode);
+    const nodePos = computeNodePos(mouse.position.x, mouse.position.y);
+    newNode.x = nodePos.x - (newNode.width || 120) / 2;
+    newNode.y = nodePos.y - (newNode.height || 50) / 2;
+    unref(flowData).nodeList.push(newNode);
+    emits('update:data', unref(flowData));
+    message.success(`已添加模板节点「${newNode.nodeName}」`);
   }
 
   // 画布鼠标移动
@@ -551,7 +611,8 @@
   }
 
   // 节点右键
-  function showNodeContextMenu(e: MouseEvent) {
+  function showNodeContextMenu(e: MouseEvent, node: INode) {
+    const isLane = node?.type === LaneNodeTypeEnum.X_LANE || node?.type === LaneNodeTypeEnum.Y_LANE;
     createContextMenu({
       event: e,
       items: [
@@ -563,12 +624,43 @@
         },
         {
           handler: () => {
+            emits('saveAsTemplate', unref(currentSelect));
+          },
+          label: '另存为模板',
+        },
+        {
+          handler: () => {
+            convertToSubflow();
+          },
+          label: '转为子流程',
+          hidden: isLane || !!node?.isSubflow,
+        },
+        {
+          handler: () => {
             deleteNode();
           },
           label: '删除节点',
         },
       ],
     });
+  }
+
+  // 转为折叠子流程节点
+  function convertToSubflow() {
+    const node = unref(currentSelect) as INode;
+    if (!node?.id) return;
+    node.isSubflow = true;
+    if (!node.subflow) {
+      node.subflow = { nodeList: [], linkList: [] };
+    }
+    message.success('已转换为折叠子流程节点，双击节点可进入内部画布');
+  }
+
+  // 双击节点（进入子流程）
+  function nodeDblclick(node: INode) {
+    if (node.isSubflow) {
+      emits('enterSubflow', node);
+    }
   }
 
   // 流程图信息
@@ -631,6 +723,66 @@
 
   // 删除节点
   function deleteNode() {
+    const node = unref(currentSelect) as INode;
+    if (node?.isSubflow && node.subflow && node.subflow.nodeList.length > 0) {
+      subflowDeleteVisible.value = true;
+      return;
+    }
+    doDeleteNode();
+  }
+
+  // 删除子流程节点确认弹窗
+  const subflowDeleteVisible = ref(false);
+  const subflowDeleteCount = computed(
+    () => (unref(currentSelect) as INode)?.subflow?.nodeList?.length ?? 0,
+  );
+
+  // 确认删除子流程节点（promote 为 false 时连带删除内部内容）
+  function confirmDeleteSubflow(cascade: boolean) {
+    const node = unref(currentSelect) as INode;
+    subflowDeleteVisible.value = false;
+    if (cascade) {
+      doDeleteNode();
+      message.success('已连带删除子流程节点及其内部内容');
+    } else {
+      promoteSubflowNodes(node);
+      doDeleteNode();
+      message.success('已删除节点，内部节点已提升到当前画布');
+    }
+  }
+
+  // 将子流程内部节点提升到当前画布
+  async function promoteSubflowNodes(node: INode) {
+    const subflow = node.subflow!;
+    const childLinks = subflow.linkList;
+    subflow.nodeList.forEach((child: INode) => {
+      child.x += node.x;
+      child.y += node.y;
+      unref(flowData).nodeList.push(child);
+    });
+    subflow.nodeList = [];
+    subflow.linkList = [];
+    await nextTick();
+    unref(flowData).status = FlowStatusEnum.LOADING;
+    childLinks.forEach((link: ILink) => {
+      unref(flowData).linkList.push(link);
+      props.plumb.connect({
+        source: link.sourceId,
+        target: link.targetId,
+        anchor: props.config.jsPlumbConfig.anchor.default,
+        connector: [link.cls.linkType, getConnectorParams(link.cls.linkType)],
+        paintStyle: {
+          stroke: link.cls.linkColor,
+          strokeWidth: link.cls.linkThickness,
+        },
+      });
+      applyLinkStyle(props.plumb, link);
+    });
+    unref(flowData).status = FlowStatusEnum.MODIFY;
+  }
+
+  // 执行删除节点
+  function doDeleteNode() {
     let nodeList = unref(flowData).nodeList;
     let linkList = unref(flowData).linkList;
     let arr: INode[] = [];
@@ -736,9 +888,62 @@
     }
   }
 
+  // 选中拐点走线图层中的连线
+  function selectLinkFromLayer(link: ILink) {
+    currentSelect.value = link;
+  }
+
+  // 拐点变化后重新应用连线样式
+  function onLinkStyleChange(link: ILink) {
+    applyLinkStyle(props.plumb, link);
+  }
+
+  // 拐点走线层连线右键
+  function onLinkContextMenu(payload: { event: MouseEvent; link: ILink }) {
+    emits('linkContextMenu', payload);
+  }
+
+  // 画布可视区域尺寸
+  const flowAreaElRef = ref<HTMLElement>();
+  const areaSize = reactive({
+    width: 0,
+    height: 0,
+  });
+
+  function measureAreaSize() {
+    const el = unref(flowAreaElRef);
+    if (el) {
+      areaSize.width = el.clientWidth;
+      areaSize.height = el.clientHeight;
+    }
+  }
+
+  // 小地图定位（将画布坐标点移动到视口中心）
+  function minimapMoveTo(p: { x: number; y: number }) {
+    measureAreaSize();
+    const s = container.scale;
+    const o = container.scaleOrigin;
+    container.pos = {
+      left: areaSize.width / 2 - o.x - (p.x - o.x) * s,
+      top: areaSize.height / 2 - o.y - (p.y - o.y) * s,
+    };
+  }
+
+  // 定位并高亮指定节点（大纲树点击）
+  function focusNode(node: INode) {
+    minimapMoveTo({ x: node.x + node.width / 2, y: node.y + node.height / 2 });
+    currentSelect.value = node;
+  }
+
   defineExpose({
     container,
     rectangleMultiple,
+    focusNode,
+  });
+
+  onMounted(() => {
+    measureAreaSize();
+    window.addEventListener('resize', measureAreaSize);
   });
 
   watch(
